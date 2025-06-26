@@ -32,34 +32,86 @@ class WatermarkOverlayView: NSView {
     }
     
     private func generateWatermarkPattern() {
-        let data = Data(watermarkData.utf8)
-        let watermarkBits = data.flatMap { byte in
-            (0..<8).map { (byte >> $0) & 1 }
-        }
+        // Create camera-detectable watermark pattern using robust techniques
         
-        let lengthBits = withUnsafeBytes(of: UInt32(watermarkBits.count).bigEndian) { bytes in
-            bytes.flatMap { byte in
-                (0..<8).map { (byte >> $0) & 1 }
-            }
-        }
+        // Generate micro QR pattern for the watermark data
+        let microPattern = generateMicroQRPattern(from: watermarkData)
         
-        let allBits = lengthBits + watermarkBits
+        // Create redundant patterns across the overlay
+        let redundantPattern = generateRedundantPattern(from: watermarkData)
         
+        // Combine patterns with very subtle visibility for camera detection
         var pattern: [UInt8] = []
         for i in 0..<(patternSize * patternSize * 4) {
+            let pixelIndex = i / 4
+            
             if i % 4 < 3 {
-                // RGB channels: use base value without watermark data to avoid conflicts
-                pattern.append(128)
+                // RGB channels: embed camera-detectable patterns
+                let baseValue: UInt8 = 128
+                
+                // Get bits from micro QR pattern
+                let microBit = microPattern[pixelIndex % microPattern.count]
+                
+                // Get bits from redundant pattern  
+                let redundantBit = redundantPattern[pixelIndex % redundantPattern.count]
+                
+                // Combine patterns with more visible modifications for testing (±10 levels)
+                let modification: UInt8 = (microBit == 1 || redundantBit == 1) ? 10 : 0
+                pattern.append(baseValue + modification)
             } else {
-                // Alpha channel: embed watermark data here (steganography uses RGB only)
-                let bitIndex = (i / 4) % allBits.count
-                let bit = allBits[bitIndex]
-                let baseAlpha: UInt8 = 2  // Barely visible
-                pattern.append((baseAlpha & 0xFE) | UInt8(bit))
+                // Alpha channel: more visible for testing
+                pattern.append(25)  // More visible for camera detection testing
             }
         }
         
         watermarkPattern = pattern
+    }
+    
+    private func generateMicroQRPattern(from data: String) -> [UInt8] {
+        // Create a simple 2D barcode pattern
+        let stringData = Data(data.utf8)
+        let bits = stringData.flatMap { byte in
+            (0..<8).map { (byte >> $0) & 1 }
+        }
+        
+        var pattern = [UInt8](repeating: 0, count: patternSize * patternSize)
+        
+        // Embed length in first 16 positions
+        let length = UInt16(bits.count)
+        for i in 0..<min(16, pattern.count) {
+            pattern[i] = UInt8((length >> i) & 1)
+        }
+        
+        // Embed data bits with repetition for robustness
+        for (index, bit) in bits.enumerated() {
+            let position = (index % (pattern.count - 16)) + 16
+            pattern[position] = UInt8(bit)
+        }
+        
+        return pattern
+    }
+    
+    private func generateRedundantPattern(from data: String) -> [UInt8] {
+        // Create redundant encoding with error correction
+        let errorCorrectedData = addSimpleErrorCorrection(data)
+        let stringData = Data(errorCorrectedData.utf8)
+        let bits = stringData.flatMap { byte in
+            (0..<8).map { (byte >> $0) & 1 }
+        }
+        
+        var pattern = [UInt8](repeating: 0, count: patternSize * patternSize)
+        
+        // Repeat the pattern multiple times across the overlay
+        for i in 0..<pattern.count {
+            pattern[i] = UInt8(bits[i % bits.count])
+        }
+        
+        return pattern
+    }
+    
+    private func addSimpleErrorCorrection(_ input: String) -> String {
+        // Simple repetition code - repeat each character 3 times for error correction
+        return input.map { String(repeating: String($0), count: 3) }.joined()
     }
     
     override func draw(_ dirtyRect: NSRect) {

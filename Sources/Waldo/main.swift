@@ -60,7 +60,9 @@ struct EmbedCommand: ParsableCommand {
     
     private func processImage(_ image: CGImage, userID: String, watermark: String, suffix: String = "") {
         let finalWatermark = watermark.isEmpty ? SystemInfo.getWatermarkDataWithHourlyTimestamp() : watermark
-        guard let watermarkedImage = SteganographyEngine.embedWatermark(in: image, watermark: finalWatermark, userID: userID) else {
+        let fullWatermark = "\(userID):\(finalWatermark):\(Date().timeIntervalSince1970)"
+        
+        guard let watermarkedImage = RobustWatermarkEngine.embedPhotoResistantWatermark(in: image, data: fullWatermark) else {
             print("Error: Failed to embed watermark")
             return
         }
@@ -117,26 +119,38 @@ struct ExtractCommand: ParsableCommand {
         if let result = PhotoProcessor.extractWatermarkFromPhoto(at: photoURL) {
             print("🔍 Watermark detected!")
             
+            // The robust extraction already provides parsed components
+            print("Username: \(result.userID)")
+            
+            // Try to parse the watermark portion for additional details
             if let parsed = SystemInfo.parseWatermarkData(result.watermark) {
-                print("Username: \(parsed.username ?? "unknown")")
                 print("Computer: \(parsed.computerName ?? "unknown")")
                 print("Machine UUID: \(parsed.machineUUID ?? "unknown")")
-                
-                if verbose, let timestamp = parsed.timestamp {
-                    let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
-                    print("Timestamp: \(date)")
-                }
-                
-                // Log extraction to API
-                APIClient.shared.logExtraction(
-                    watermarkData: result.watermark,
-                    photoPath: photoPath,
-                    confidence: 1.0
-                )
             } else {
-                print("Raw watermark: \(result.watermark)")
-                print("Warning: Could not parse watermark format")
+                // For robust extraction, the watermark might be in a different format
+                let components = result.watermark.components(separatedBy: ":")
+                if components.count >= 2 {
+                    print("Computer: \(components[0])")
+                    if components.count >= 3 {
+                        print("Machine UUID: \(components[1])")
+                    }
+                } else {
+                    print("Computer: \(result.watermark)")
+                    print("Machine UUID: unknown")
+                }
             }
+            
+            if verbose {
+                let date = Date(timeIntervalSince1970: result.timestamp)
+                print("Timestamp: \(date)")
+            }
+            
+            // Log extraction to API
+            APIClient.shared.logExtraction(
+                watermarkData: "\(result.userID):\(result.watermark):\(Int(result.timestamp))",
+                photoPath: photoPath,
+                confidence: 1.0
+            )
         } else {
             print("❌ No watermark detected in the image")
             throw ExitCode.failure

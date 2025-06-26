@@ -27,6 +27,12 @@ class PhotoProcessor {
             return nil
         }
         
+        // Try robust extraction first (for camera photos)
+        if let robustResult = RobustWatermarkEngine.extractPhotoResistantWatermark(from: image) {
+            return parseRobustWatermark(robustResult)
+        }
+        
+        // Fall back to original steganography (for digital screenshots)
         return SteganographyEngine.extractWatermark(from: image)
     }
     
@@ -36,7 +42,27 @@ class PhotoProcessor {
             return nil
         }
         
+        // Try robust extraction first (for camera photos)
+        if let robustResult = RobustWatermarkEngine.extractPhotoResistantWatermark(from: image) {
+            return parseRobustWatermark(robustResult)
+        }
+        
+        // Fall back to original steganography (for digital screenshots)
         return SteganographyEngine.extractWatermark(from: image)
+    }
+    
+    private static func parseRobustWatermark(_ watermarkString: String) -> (userID: String, watermark: String, timestamp: TimeInterval)? {
+        let components = watermarkString.components(separatedBy: ":")
+        
+        guard components.count >= 3,
+              let timestamp = TimeInterval(components.last!) else {
+            return nil
+        }
+        
+        let userID = components[0]
+        let watermark = components[1..<components.count-1].joined(separator: ":")
+        
+        return (userID: userID, watermark: watermark, timestamp: timestamp)
     }
     
     static func batchExtractWatermarks(from urls: [URL]) -> [(url: URL, result: (userID: String, watermark: String, timestamp: TimeInterval)?)] {
