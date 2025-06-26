@@ -20,7 +20,6 @@ let package = Package(
             dependencies: [
                 .product(name: "ArgumentParser", package: "swift-argument-parser")
             ],
-            exclude: ["UserDatabase.swift.deprecated"],
             swiftSettings: [
                 .unsafeFlags(["-parse-as-library"])
             ]),
