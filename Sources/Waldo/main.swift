@@ -119,30 +119,24 @@ struct ExtractCommand: ParsableCommand {
         if let result = PhotoProcessor.extractWatermarkFromPhoto(at: photoURL) {
             print("🔍 Watermark detected!")
             
-            // The robust extraction already provides parsed components
-            print("Username: \(result.userID)")
+            // Display raw watermark data split on ":"
+            let fullWatermark = "\(result.userID):\(result.watermark):\(Int(result.timestamp))"
+            let components = fullWatermark.components(separatedBy: ":")
+            let labels = ["Username", "Computer-name", "Machine-uuid", "Timestamp"]
             
-            // Try to parse the watermark portion for additional details
-            if let parsed = SystemInfo.parseWatermarkData(result.watermark) {
-                print("Computer: \(parsed.computerName ?? "unknown")")
-                print("Machine UUID: \(parsed.machineUUID ?? "unknown")")
-            } else {
-                // For robust extraction, the watermark might be in a different format
-                let components = result.watermark.components(separatedBy: ":")
-                if components.count >= 2 {
-                    print("Computer: \(components[0])")
-                    if components.count >= 3 {
-                        print("Machine UUID: \(components[1])")
-                    }
+            for (index, component) in components.enumerated() {
+                let label = index < labels.count ? labels[index] : "Field \(index + 1)"
+                
+                if label == "Timestamp", let timestamp = Double(component) {
+                    let date = Date(timeIntervalSince1970: timestamp)
+                    let formatter = DateFormatter()
+                    formatter.dateStyle = .medium
+                    formatter.timeStyle = .medium
+                    formatter.timeZone = TimeZone.current
+                    print("\(label): \(formatter.string(from: date))")
                 } else {
-                    print("Computer: \(result.watermark)")
-                    print("Machine UUID: unknown")
+                    print("\(label): \(component)")
                 }
-            }
-            
-            if verbose {
-                let date = Date(timeIntervalSince1970: result.timestamp)
-                print("Timestamp: \(date)")
             }
             
             // Log extraction to API
