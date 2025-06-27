@@ -2,7 +2,7 @@ import CoreGraphics
 import Foundation
 import Accelerate
 
-class RobustWatermarkEngine {
+class WatermarkEngine {
     
     // MARK: - Public Interface
     
@@ -87,7 +87,7 @@ class RobustWatermarkEngine {
             }
         }
         
-        return bestScore > 0.1 ? bestResult : nil  // Lower confidence threshold for camera photos
+        return bestScore > 0.8 ? bestResult : nil  // Require high confidence for camera photos
     }
     
     private static func extractOverlayPatternAt(_ pixelData: [UInt8], width: Int, height: Int, 
@@ -213,38 +213,31 @@ class RobustWatermarkEngine {
     }
     
     private static func decodeOverlayPatternDirect(_ bits: [UInt8]) -> String? {
-        // Try different approaches to decode the pattern
+        // Try to decode actual embedded patterns from bits
         
-        // Approach 1: Look for repeating patterns that might be the watermark
-        let testString = "wfdeller:William's Laptop:D8F5BDED-6E6F-51C7-8410-D6EBE3875A79:1750975200"
-        let testBits = Data(testString.utf8).flatMap { byte in
-            (0..<8).map { (byte >> $0) & 1 }
-        }
+        // Convert bits to bytes and attempt to decode as UTF-8
+        guard bits.count >= 8 else { return nil }
         
-        // Look for correlation with expected pattern
-        var bestCorrelation = 0
-        var bestOffset = 0
-        
-        let maxOffset = min(max(0, bits.count - testBits.count), 100)
-        for offset in 0..<maxOffset {
-            var correlation = 0
-            let maxLen = min(testBits.count, bits.count - offset)
-            for i in 0..<maxLen {
-                if bits[offset + i] == UInt8(testBits[i]) {
-                    correlation += 1
+        var bytes: [UInt8] = []
+        for i in stride(from: 0, to: bits.count - 7, by: 8) {
+            var byte: UInt8 = 0
+            for j in 0..<8 {
+                if i + j < bits.count && bits[i + j] == 1 {
+                    byte |= (1 << j)
                 }
             }
+            bytes.append(byte)
             
-            if correlation > bestCorrelation {
-                bestCorrelation = correlation
-                bestOffset = offset
-            }
+            // Stop if we have enough for a reasonable watermark
+            if bytes.count > 200 { break }
         }
         
-        let correlationRatio = Double(bestCorrelation) / Double(testBits.count)
-        
-        if correlationRatio > 0.4 {  // Lower threshold for camera photos
-            return testString
+        // Try to decode as UTF-8 string
+        if let string = String(bytes: bytes, encoding: .utf8) {
+            // Only return if it looks like a watermark (contains colons and reasonable length)
+            if string.contains(":") && string.count > 10 && string.count < 200 {
+                return string
+            }
         }
         
         return nil
@@ -341,7 +334,7 @@ class RobustWatermarkEngine {
                 correlation /= Float(count)
                 
                 // If correlation is above threshold, try to extract
-                if abs(correlation) > 1.0 {
+                if abs(correlation) > 5.0 {
                     return extractWatermarkWithSequence(from: pixelData, width: width, height: height, sequence: sequence)
                 }
             }

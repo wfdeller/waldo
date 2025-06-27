@@ -34,12 +34,4 @@ final class WaldoTests: XCTestCase {
         XCTAssertEqual(parsed?.timestamp, 1703875200)
     }
     
-    func testAPIClientInitialization() throws {
-        let client = APIClient.shared
-        let status = client.getQueueStatus()
-        
-        XCTAssertNotNil(status["baseURL"])
-        XCTAssertNotNil(status["queuedEvents"])
-        XCTAssertNotNil(status["hasApiKey"])
-    }
 }

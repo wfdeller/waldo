@@ -28,8 +28,8 @@ class PhotoProcessor {
         }
         
         // Try robust extraction first (for camera photos)
-        if let robustResult = RobustWatermarkEngine.extractPhotoResistantWatermark(from: image) {
-            return parseRobustWatermark(robustResult)
+        if let robustResult = WatermarkEngine.extractPhotoResistantWatermark(from: image) {
+            return parseWatermark(robustResult)
         }
         
         // Fall back to original steganography (for digital screenshots)
@@ -43,18 +43,18 @@ class PhotoProcessor {
         }
         
         // Try robust extraction first (for camera photos)
-        if let robustResult = RobustWatermarkEngine.extractPhotoResistantWatermark(from: image) {
-            return parseRobustWatermark(robustResult)
+        if let robustResult = WatermarkEngine.extractPhotoResistantWatermark(from: image) {
+            return parseWatermark(robustResult)
         }
         
         // Fall back to original steganography (for digital screenshots)
         return SteganographyEngine.extractWatermark(from: image)
     }
     
-    private static func parseRobustWatermark(_ watermarkString: String) -> (userID: String, watermark: String, timestamp: TimeInterval)? {
+    private static func parseWatermark(_ watermarkString: String) -> (userID: String, watermark: String, timestamp: TimeInterval)? {
         let components = watermarkString.components(separatedBy: ":")
         
-        guard components.count >= 3,
+        guard components.count >= 4,
               let timestamp = TimeInterval(components.last!) else {
             return nil
         }
@@ -62,7 +62,40 @@ class PhotoProcessor {
         let userID = components[0]
         let watermark = components[1..<components.count-1].joined(separator: ":")
         
+        // Validate watermark format and content
+        guard isValidWatermark(userID: userID, watermark: watermark, timestamp: timestamp) else {
+            return nil
+        }
+        
         return (userID: userID, watermark: watermark, timestamp: timestamp)
+    }
+    
+    private static func isValidWatermark(userID: String, watermark: String, timestamp: TimeInterval) -> Bool {
+        // Validate userID (should be non-empty and reasonable length)
+        guard !userID.isEmpty && userID.count <= 50 else {
+            return false
+        }
+        
+        // Validate watermark components (should contain computer name and UUID)
+        let watermarkComponents = watermark.components(separatedBy: ":")
+        guard watermarkComponents.count >= 2 else {
+            return false
+        }
+        
+        // Validate timestamp (should be within last 10 years and not future)
+        let now = Date().timeIntervalSince1970
+        let tenYearsAgo = now - (10 * 365 * 24 * 60 * 60)
+        guard timestamp >= tenYearsAgo && timestamp <= now + 3600 else { // Allow 1 hour future for clock skew
+            return false
+        }
+        
+        // Validate UUID format in watermark (basic check for UUID-like structure)
+        let possibleUUID = watermarkComponents.last ?? ""
+        let uuidPattern = "^[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}$"
+        let uuidRegex = try? NSRegularExpression(pattern: uuidPattern, options: [])
+        let hasValidUUID = uuidRegex?.firstMatch(in: possibleUUID, options: [], range: NSRange(location: 0, length: possibleUUID.count)) != nil
+        
+        return hasValidUUID
     }
     
     static func batchExtractWatermarks(from urls: [URL]) -> [(url: URL, result: (userID: String, watermark: String, timestamp: TimeInterval)?)] {

@@ -26,12 +26,6 @@ class OverlayWindowManager: NSObject {
         createOverlayWindows()
         startRefreshTimer()
         
-        APIClient.shared.logEvent(
-            eventType: "overlay_start",
-            watermarkData: SystemInfo.getWatermarkDataWithHourlyTimestamp(),
-            metadata: ["screenCount": NSScreen.screens.count]
-        )
-        
         print("✓ Desktop overlay watermarking started on \(NSScreen.screens.count) display(s)")
     }
     
@@ -41,12 +35,6 @@ class OverlayWindowManager: NSObject {
         isActive = false
         stopRefreshTimer()
         removeAllOverlayWindows()
-        
-        APIClient.shared.logEvent(
-            eventType: "overlay_stop",
-            watermarkData: SystemInfo.getWatermarkDataWithHourlyTimestamp(),
-            metadata: ["duration_seconds": refreshTimer?.timeInterval ?? 0]
-        )
         
         print("✓ Desktop overlay watermarking stopped")
     }
@@ -59,12 +47,6 @@ class OverlayWindowManager: NSObject {
         for (_, view) in watermarkViews {
             view.updateWatermarkData(newWatermarkData)
         }
-        
-        APIClient.shared.logEvent(
-            eventType: "watermark_refresh",
-            watermarkData: newWatermarkData,
-            metadata: ["screenCount": NSScreen.screens.count]
-        )
         
         print("✓ Watermark overlay refreshed at \(SystemInfo.getFormattedTimestamp())")
     }
@@ -174,12 +156,12 @@ class OverlayWindowManager: NSObject {
         }
         
         print("Created overlay window for screen:")
-        print("  Frame: \(Int(frame.width))x\(Int(frame.height)) at (\(Int(frame.origin.x)), \(Int(frame.origin.y)))")
-        print("  Visible: \(Int(visibleFrame.width))x\(Int(visibleFrame.height)) at (\(Int(visibleFrame.origin.x)), \(Int(visibleFrame.origin.y)))")
-        print("  Backing Scale: \(backingScaleFactor)x")
-        print("  Logical Resolution: \(Int(frame.width * backingScaleFactor))x\(Int(frame.height * backingScaleFactor))")
-        print("  Native Resolution: \(nativeWidth)x\(nativeHeight)")
-        print("  Overlay covers logical resolution (watermarks will scale with display settings)")
+        print(".  Frame: \(Int(frame.width))x\(Int(frame.height)) at (\(Int(frame.origin.x)), \(Int(frame.origin.y)))")
+        print(".  Visible: \(Int(visibleFrame.width))x\(Int(visibleFrame.height)) at (\(Int(visibleFrame.origin.x)), \(Int(visibleFrame.origin.y)))")
+        print(".  Backing Scale: \(backingScaleFactor)x")
+        print(".  Logical Resolution: \(Int(frame.width * backingScaleFactor))x\(Int(frame.height * backingScaleFactor))")
+        print(".  Native Resolution: \(nativeWidth)x\(nativeHeight)")
+        print(".  Overlay covers logical resolution (watermarks will scale with display settings)")
     }
     
     private func removeAllOverlayWindows() {
@@ -234,11 +216,6 @@ class OverlayWindowManager: NSObject {
         print("Screen configuration changed, updating overlays...")
         createOverlayWindows()
         
-        APIClient.shared.logEvent(
-            eventType: "screen_change",
-            watermarkData: SystemInfo.getWatermarkDataWithHourlyTimestamp(),
-            metadata: ["newScreenCount": NSScreen.screens.count]
-        )
     }
     
     private func isWaldoDaemonRunning() -> Bool {
