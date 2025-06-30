@@ -6,8 +6,15 @@ import Cocoa
 /// Ensures consistency between overlay generation and camera detection
 struct WatermarkConstants {
     
-    /// Photo Confidence Threshold
-    static let PHOTO_CONFIDENCE_THRESHOLD = 0.8
+    /// Photo Confidence Threshold (lowered for enhanced detection)
+    static let PHOTO_CONFIDENCE_THRESHOLD = 0.6
+    
+    /// Variance threshold for adaptive thresholding (smooth vs noisy images)
+    static let VARIANCE_THRESHOLD: Double = 400.0
+    
+    /// Threshold multipliers for adaptive detection
+    static let SMOOTH_IMAGE_MULTIPLIER: Double = 0.5  // More sensitive for smooth images
+    static let NOISY_IMAGE_MULTIPLIER: Double = 1.0   // Standard sensitivity for noisy images
     
     // MARK: - RGB Encoding Values
     
@@ -16,24 +23,24 @@ struct WatermarkConstants {
     
     /// RGB modification strength for 1-bits (±delta from base)
     /// Higher values = more visible but more camera-detectable
-    static let RGB_DELTA: Int = 25         // Balanced for camera detection
+    static let RGB_DELTA: Int = 45         // Enhanced for camera detection
     
     /// Alpha opacity for overlay visibility (0-255)
     /// Higher values = more visible but more camera-detectable  
-    static let ALPHA_OPACITY: Int = 20     // Minimally intrusive default
+    static let ALPHA_OPACITY: Int = 40     // Enhanced for camera detection
     
     // MARK: - Pattern Configuration
     
     /// Size of each pattern tile in pixels
-    static let PATTERN_SIZE: Int = 64
+    static let PATTERN_SIZE: Int = 128
     
     /// Detection threshold for extraction (should be less than RGB_DELTA)
     /// Allows tolerance for camera compression/noise
-    static let DETECTION_THRESHOLD: Int = 15
+    static let DETECTION_THRESHOLD: Int = 25
     
     /// Detection tolerance for pattern matching (±pixels)
     /// Accounts for JPEG compression and camera processing
-    static let DETECTION_TOLERANCE: Int = 10
+    static let DETECTION_TOLERANCE: Int = 20
     
     // MARK: - Window Positioning
     
@@ -46,7 +53,7 @@ struct WatermarkConstants {
     // MARK: - Computed Values
     
     /// RGB value for 1-bits in overlay
-    static var RGB_HIGH: Int { RGB_BASE + RGB_DELTA }  // 128 + 30 = 158
+    static var RGB_HIGH: Int { RGB_BASE + RGB_DELTA }  // 128 + 45 = 173
     
     /// RGB value for 0-bits in overlay  
     static var RGB_LOW: Int { RGB_BASE }               // 128
@@ -64,14 +71,14 @@ struct WatermarkConstants {
     // MARK: - Configuration Notes
     
     /// Camera Detection Optimization:
-    /// - RGB_DELTA of 25 provides 10% signal strength for camera detection
-    /// - ALPHA_OPACITY of 20 provides 8% visibility (minimally intrusive)
+    /// - RGB_DELTA of 45 provides 18% signal strength for enhanced camera detection
+    /// - ALPHA_OPACITY of 40 provides 16% visibility (enhanced for detection)
     /// - Primary detection relies on RGB patterns, not alpha opacity
     /// - Values can be increased for stronger watermarks or decreased for subtlety
     ///
     /// Tuning Guidelines:
     /// - Increase RGB_DELTA (25→35→45) for better camera detection
-    /// - Increase ALPHA_OPACITY (20→40→60) for more visible patterns
+    /// - Increase ALPHA_OPACITY (40→60→80) for more visible patterns
     /// - Adjust PATTERN_SIZE (64→128) for different detection scales
     /// - Keep DETECTION_THRESHOLD < RGB_DELTA for reliable extraction
     /// - Use --opacity parameter in CLI to override default for specific needs

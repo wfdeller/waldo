@@ -23,11 +23,14 @@ struct ExtractCommand: ParsableCommand {
     @Argument(help: "Path to photo file")
     var photoPath: String
     
-    @Option(name: .shortAndLong, help: "Confidence threshold (0.0-1.0, default: 0.8)")
+    @Option(name: .shortAndLong, help: "Confidence threshold (0.0-1.0, default: 0.6)")
     var threshold: Double = WatermarkConstants.PHOTO_CONFIDENCE_THRESHOLD
     
     @Flag(name: .shortAndLong, help: "Show detailed information")
     var verbose: Bool = false
+    
+    @Flag(name: .shortAndLong, help: "Show debug information for detection failures")
+    var debug: Bool = false
     
     func run() throws {
         print("Waldo v\(Version.current)")
@@ -54,7 +57,7 @@ struct ExtractCommand: ParsableCommand {
             print("Using confidence threshold: \(threshold)")
         }
         
-        if let result = PhotoProcessor.extractWatermarkFromPhoto(at: photoURL, threshold: threshold, verbose: verbose) {
+        if let result = PhotoProcessor.extractWatermarkFromPhoto(at: photoURL, threshold: threshold, verbose: verbose, debug: debug) {
             print("Watermark detected!")
             
             // Display raw watermark data split on ":"
@@ -147,7 +150,7 @@ struct StartOverlayCommand: ParsableCommand {
     @Option(name: .shortAndLong, help: "Custom watermark text")
     var watermark: String = "desktop"
     
-    @Option(name: .shortAndLong, help: "Overlay opacity (1-255, default: 20)")
+    @Option(name: .shortAndLong, help: "Overlay opacity (1-255, default: 40)")
     var opacity: Int = WatermarkConstants.ALPHA_OPACITY
     
     @Flag(name: .shortAndLong, help: "Run in background (daemon mode)")
@@ -155,6 +158,7 @@ struct StartOverlayCommand: ParsableCommand {
     
     func run() throws {
         print("Waldo v\(Version.current)")
+        print("Watermark pattern size: \(WatermarkConstants.PATTERN_SIZE) pixels")
         
         // Validate opacity parameter
         guard opacity >= 1 && opacity <= 255 else {

@@ -28,24 +28,35 @@ class WatermarkEngine {
         return result
     }
     
-    static func extractPhotoResistantWatermark(from image: CGImage, threshold: Double = WatermarkConstants.PHOTO_CONFIDENCE_THRESHOLD, verbose: Bool = false) -> String? {
+    static func extractPhotoResistantWatermark(from image: CGImage, threshold: Double = WatermarkConstants.PHOTO_CONFIDENCE_THRESHOLD, verbose: Bool = false, debug: Bool = false) -> String? {
         // Try overlay-specific extraction first (for camera photos of screens)
-        if let overlayResult = extractOverlayWatermark(from: image, threshold: threshold, verbose: verbose) {
+        if let overlayResult = extractOverlayWatermark(from: image, threshold: threshold, verbose: verbose, debug: debug) {
             return overlayResult
         }
         
+        if debug { print("Debug: Overlay extraction failed, trying redundant...") }
+        
         // Try multiple extraction methods in order of robustness
         if let redundantResult = extractRedundantWatermark(from: image) { 
+            if debug { print("Debug: Redundant extraction succeeded") }
             return redundantResult 
         }
         
+        if debug { print("Debug: Redundant extraction failed, trying micro QR...") }
+        
         if let qrResult = extractMicroQRPattern(from: image) { 
+            if debug { print("Debug: Micro QR extraction succeeded") }
             return qrResult 
         }
         
+        if debug { print("Debug: Micro QR extraction failed, trying spread spectrum...") }
+        
         if let spreadResult = extractSpreadSpectrum(from: image) { 
+            if debug { print("Debug: Spread spectrum extraction succeeded") }
             return spreadResult 
         }
+        
+        if debug { print("Debug: All WatermarkEngine methods failed") }
         
         return nil
     }
@@ -101,8 +112,9 @@ class WatermarkEngine {
         if verbose { print(".    Average image variance: \(String(format: "%.2f")) (from \(sampleCount) samples)") }
         
         // Lower threshold for low-variance (smooth) images, higher for high-variance (noisy) images
-        let varianceThreshold: Double = 500.0 // Adjust based on testing
-        let thresholdMultiplier = avgVariance < varianceThreshold ? 0.7 : 1.3
+        // More aggressive thresholds for better camera photo detection
+        let varianceThreshold = WatermarkConstants.VARIANCE_THRESHOLD
+        let thresholdMultiplier = avgVariance < varianceThreshold ? WatermarkConstants.SMOOTH_IMAGE_MULTIPLIER : WatermarkConstants.NOISY_IMAGE_MULTIPLIER
         let adaptiveThreshold = baseThreshold * thresholdMultiplier
         
         if verbose { print(".    Image type: \(avgVariance < varianceThreshold ? "smooth" : "noisy")") }
@@ -112,7 +124,7 @@ class WatermarkEngine {
         return adaptiveThreshold
     }
     
-    private static func extractOverlayWatermark(from image: CGImage, threshold: Double = WatermarkConstants.PHOTO_CONFIDENCE_THRESHOLD, verbose: Bool = false) -> String? {
+    private static func extractOverlayWatermark(from image: CGImage, threshold: Double = WatermarkConstants.PHOTO_CONFIDENCE_THRESHOLD, verbose: Bool = false, debug: Bool = false) -> String? {
         guard let pixelData = extractPixelData(from: image) else { return nil }
         
         let width = image.width
@@ -120,7 +132,9 @@ class WatermarkEngine {
         
         if verbose { print(".  Trying overlay watermark extraction...") }
         // Try more aggressive tile sizes (camera might scale the overlay differently)
-        let tileSizes = [8, 12, 16, 24, 32, 40, 48, 56, 64, 80, 96, 128]
+        // Center around PATTERN_SIZE (64) with variations for camera scaling
+        let patternSize = WatermarkConstants.PATTERN_SIZE
+        let tileSizes = [8, 12, 16, 24, 32, 40, 48, 56, patternSize, 80, 96, patternSize * 2]
         
         // Sample multiple regions to find the strongest pattern - more comprehensive grid
         var bestResult: String?
@@ -195,6 +209,19 @@ class WatermarkEngine {
         }
         let passed = bestScore > adaptiveThreshold && bestResult != nil && !bestResult!.isEmpty
         if verbose { print(".  Threshold check: \(passed ? "PASSED" : "FAILED") - \(passed ? "watermark detected" : "no watermark found")") }
+        
+        if debug && !passed {
+            print("Debug: Overlay extraction failed:")
+            print("  - Best score: \(String(format: "%.3f", bestScore))")
+            print("  - Adaptive threshold: \(String(format: "%.3f", adaptiveThreshold))")
+            print("  - Score above threshold: \(bestScore > adaptiveThreshold)")
+            print("  - Best result found: \(bestResult != nil)")
+            if let result = bestResult {
+                print("  - Result not empty: \(!result.isEmpty)")
+                print("  - Result content: '\(result)'")
+            }
+        }
+        
         return passed ? bestResult : nil  
     }
     
@@ -205,7 +232,8 @@ class WatermarkEngine {
         var sampleCount = 0
         var patternMatches = 0
         
-        let scaledTolerance = Int(Double(WatermarkConstants.DETECTION_TOLERANCE) * max(0.5, scaleFactor))
+        // More generous tolerance for camera photos with compression artifacts
+        let scaledTolerance = Int(Double(WatermarkConstants.DETECTION_TOLERANCE) * max(1.0, scaleFactor * 1.5))
         
         // Extract pattern from a tile-sized region
         for y in 0..<tileSize {
@@ -493,7 +521,7 @@ class WatermarkEngine {
             for i in 0..<min(sequence.count, width * height) {
                 let pixelIndex = i * 4 + 1 // Green channel
                 if pixelIndex < pixelData.count {
-                    let pixelValue = Float(pixelData[pixelIndex]) - 128 // Center around 0
+                    let pixelValue = Float(pixelData[pixelIndex]) - Float(WatermarkConstants.RGB_BASE) // Center around 0
                     correlation += pixelValue * sequence[i]
                     count += 1
                 }
@@ -531,7 +559,7 @@ class WatermarkEngine {
         for i in 0..<min(sequence.count, width * height) {
             let pixelIndex = i * 4 + 1 // Green channel
             if pixelIndex < pixelData.count {
-                let pixelValue = Float(pixelData[pixelIndex]) - 128
+                let pixelValue = Float(pixelData[pixelIndex]) - Float(WatermarkConstants.RGB_BASE)
                 let correlation = pixelValue * sequence[i]
                 extractedBits.append(correlation > 0 ? 1 : 0)
             }
@@ -769,22 +797,38 @@ class WatermarkEngine {
         // Create a simple 2D barcode-like pattern
         let pattern = generateMicroPattern(from: watermark)
         let patternSize = 32
+        let margin = 10
+        let menuBarOffset = 40  // Move QR codes below menu bar area
         
-        // Embed pattern in corner (very subtle)
-        let startX = width - patternSize - 10
-        let startY = 10
+        // Define all four corner positions
+        let corners = [
+            (x: width - patternSize - margin, y: menuBarOffset),                    // Top-right
+            (x: margin, y: menuBarOffset),                                          // Top-left  
+            (x: width - patternSize - margin, y: height - patternSize - margin),   // Bottom-right
+            (x: margin, y: height - patternSize - margin)                          // Bottom-left
+        ]
         
-        for y in 0..<patternSize {
-            for x in 0..<patternSize {
-                let pixelIndex = ((startY + y) * width + (startX + x)) * 4
-                if pixelIndex + 3 < modifiedData.count {
-                    let patternValue = pattern[y * patternSize + x]
-                    let modification: UInt8 = patternValue == 1 ? 2 : 0
-                    
-                    // Very subtle modification to RGB
-                    modifiedData[pixelIndex] = (modifiedData[pixelIndex] & 0xFC) | (modification & 0x03)
-                    modifiedData[pixelIndex + 1] = (modifiedData[pixelIndex + 1] & 0xFC) | (modification & 0x03)
-                    modifiedData[pixelIndex + 2] = (modifiedData[pixelIndex + 2] & 0xFC) | (modification & 0x03)
+        // Embed pattern in all four corners
+        for corner in corners {
+            for y in 0..<patternSize {
+                for x in 0..<patternSize {
+                    let pixelIndex = ((corner.y + y) * width + (corner.x + x)) * 4
+                    if pixelIndex + 3 < modifiedData.count {
+                        let patternValue = pattern[y * patternSize + x]
+                        
+                        // Use same contrast as main watermark for better camera detection
+                        if patternValue == 1 {
+                            // Set to RGB_HIGH for 1-bits
+                            modifiedData[pixelIndex] = UInt8(WatermarkConstants.RGB_HIGH)
+                            modifiedData[pixelIndex + 1] = UInt8(WatermarkConstants.RGB_HIGH)
+                            modifiedData[pixelIndex + 2] = UInt8(WatermarkConstants.RGB_HIGH)
+                        } else {
+                            // Set to RGB_LOW for 0-bits
+                            modifiedData[pixelIndex] = UInt8(WatermarkConstants.RGB_LOW)
+                            modifiedData[pixelIndex + 1] = UInt8(WatermarkConstants.RGB_LOW)
+                            modifiedData[pixelIndex + 2] = UInt8(WatermarkConstants.RGB_LOW)
+                        }
+                    }
                 }
             }
         }
@@ -799,39 +843,76 @@ class WatermarkEngine {
         }
         
         let width = image.width
-        let _ = image.height
+        let height = image.height
         let patternSize = 32
+        let margin = 10
+        let menuBarOffset = 40  // Same offset used in embedding
         
-        let startX = width - patternSize - 10
-        let startY = 10
+        // Define all four corner positions (same as embedding)
+        let corners = [
+            (x: width - patternSize - margin, y: menuBarOffset, name: "Top-right"),                    
+            (x: margin, y: menuBarOffset, name: "Top-left"),                                          
+            (x: width - patternSize - margin, y: height - patternSize - margin, name: "Bottom-right"),   
+            (x: margin, y: height - patternSize - margin, name: "Bottom-left")                          
+        ]
         
-        print("Extracting micro QR from position (\(startX), \(startY))")
+        print("Extracting micro QR from all four corners...")
         
-        var extractedPattern: [UInt8] = []
-        
-        for y in 0..<patternSize {
-            for x in 0..<patternSize {
-                let pixelIndex = ((startY + y) * width + (startX + x)) * 4
-                if pixelIndex + 2 < pixelData.count {
-                    let r = pixelData[pixelIndex] & 0x03
-                    let g = pixelData[pixelIndex + 1] & 0x03
-                    let b = pixelData[pixelIndex + 2] & 0x03
-                    
-                    let avgModification = (Int(r) + Int(g) + Int(b)) / 3
-                    extractedPattern.append(avgModification > 1 ? 1 : 0)
+        // Try extraction from each corner
+        for corner in corners {
+            print(".  Trying \(corner.name) corner at (\(corner.x), \(corner.y))")
+            
+            var extractedPattern: [UInt8] = []
+            var validExtraction = true
+            
+            for y in 0..<patternSize {
+                for x in 0..<patternSize {
+                    let pixelIndex = ((corner.y + y) * width + (corner.x + x)) * 4
+                    if pixelIndex + 2 < pixelData.count {
+                        let r = Int(pixelData[pixelIndex])
+                        let g = Int(pixelData[pixelIndex + 1])
+                        let b = Int(pixelData[pixelIndex + 2])
+                        
+                        // Use same detection logic as main watermark
+                        let avgRGB = (r + g + b) / 3
+                        let tolerance = WatermarkConstants.DETECTION_TOLERANCE
+                        
+                        let isHigh = abs(avgRGB - WatermarkConstants.RGB_HIGH) <= tolerance
+                        let isLow = abs(avgRGB - WatermarkConstants.RGB_LOW) <= tolerance
+                        
+                        if isHigh {
+                            extractedPattern.append(1)
+                        } else if isLow {
+                            extractedPattern.append(0)
+                        } else {
+                            // Fallback: use threshold midpoint
+                            let midpoint = (WatermarkConstants.RGB_HIGH + WatermarkConstants.RGB_LOW) / 2
+                            extractedPattern.append(avgRGB > midpoint ? 1 : 0)
+                        }
+                    } else {
+                        print(".    Pixel index out of bounds: \(pixelIndex)")
+                        validExtraction = false
+                        break
+                    }
+                }
+                if !validExtraction { break }
+            }
+            
+            if validExtraction {
+                print(".    Extracted pattern length: \(extractedPattern.count)")
+                print(".    First 32 bits: \(Array(extractedPattern.prefix(32)))")
+                
+                if let result = decodeMicroPattern(extractedPattern) {
+                    print(".    Successfully decoded from \(corner.name) corner: \(result)")
+                    return result
                 } else {
-                    print(".  Pixel index out of bounds: \(pixelIndex)")
-                    return nil
+                    print(".    Failed to decode from \(corner.name) corner")
                 }
             }
         }
         
-        print(".  Extracted pattern length: \(extractedPattern.count)")
-        print(".  First 32 bits: \(Array(extractedPattern.prefix(32)))")
-        
-        let result = decodeMicroPattern(extractedPattern)
-        print(".  Decoded result: \(result ?? "nil")")
-        return result
+        print(".  No valid QR pattern found in any corner")
+        return nil
     }
     
     // MARK: - Helper Functions
@@ -1056,8 +1137,8 @@ class WatermarkEngine {
         let bf = Double(b)
         
         let y = 0.299 * rf + 0.587 * gf + 0.114 * bf
-        let u = -0.14713 * rf - 0.28886 * gf + 0.436 * bf + 128
-        let v = 0.615 * rf - 0.51499 * gf - 0.10001 * bf + 128
+        let u = -0.14713 * rf - 0.28886 * gf + 0.436 * bf + Double(WatermarkConstants.RGB_BASE)
+        let v = 0.615 * rf - 0.51499 * gf - 0.10001 * bf + Double(WatermarkConstants.RGB_BASE)
         
         return (y: Int(y), u: Int(u), v: Int(v))
     }

@@ -21,19 +21,36 @@ class PhotoProcessor {
         return image
     }
     
-    static func extractWatermarkFromPhoto(at url: URL, threshold: Double = WatermarkConstants.PHOTO_CONFIDENCE_THRESHOLD, verbose: Bool = false) -> (userID: String, watermark: String, timestamp: TimeInterval)? {
+    static func extractWatermarkFromPhoto(at url: URL, threshold: Double = WatermarkConstants.PHOTO_CONFIDENCE_THRESHOLD, verbose: Bool = false, debug: Bool = false) -> (userID: String, watermark: String, timestamp: TimeInterval)? {
         guard let image = loadImage(from: url) else {
             print("Failed to load image from: \(url)")
             return nil
         }
         
         // Try robust extraction first (for camera photos)
-        if let robustResult = WatermarkEngine.extractPhotoResistantWatermark(from: image, threshold: threshold, verbose: verbose) {
+        if let robustResult = WatermarkEngine.extractPhotoResistantWatermark(from: image, threshold: threshold, verbose: verbose, debug: debug) {
             return parseWatermark(robustResult)
         }
         
-        // Fall back to original steganography (for digital screenshots)
-        return SteganographyEngine.extractWatermark(from: image)
+        if debug {
+            print("Debug: Robust extraction failed, trying steganography fallback...")
+        }
+        
+        // Fall back to original steganography (for digital screenshots)  
+        if let stegoResult = SteganographyEngine.extractWatermark(from: image) {
+            if debug {
+                print("Debug: Steganography extraction succeeded")
+            }
+            return stegoResult
+        }
+        
+        if debug {
+            print("Debug: All extraction methods failed")
+            print("Debug: Image size: \(image.width)x\(image.height)")
+            print("Debug: Threshold used: \(threshold)")
+        }
+        
+        return nil
     }
     
     static func extractWatermarkFromPhotoData(_ data: Data, threshold: Double = WatermarkConstants.PHOTO_CONFIDENCE_THRESHOLD) -> (userID: String, watermark: String, timestamp: TimeInterval)? {
