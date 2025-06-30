@@ -27,12 +27,12 @@ class WatermarkOverlayView: NSView {
         layer?.backgroundColor = NSColor.clear.cgColor
     }
     
-    func updateWatermarkData(_ newData: String) {
+    func updateWatermarkData(_ newData: String, opacity: Int = WatermarkConstants.ALPHA_OPACITY) {
         watermarkData = newData
-        generateWatermarkPattern()
+        generateWatermarkPattern(opacity: opacity)
     }
     
-    private func generateWatermarkPattern() {
+    private func generateWatermarkPattern(opacity: Int = WatermarkConstants.ALPHA_OPACITY) {
         // Create camera-detectable watermark pattern using robust techniques
         
         // Generate micro QR pattern for the watermark data
@@ -60,8 +60,8 @@ class WatermarkOverlayView: NSView {
                 let modification: UInt8 = (microBit == 1 || redundantBit == 1) ? UInt8(WatermarkConstants.RGB_DELTA) : 0
                 pattern.append(baseValue + modification)
             } else {
-                // Alpha channel: camera detection optimized
-                pattern.append(UInt8(WatermarkConstants.ALPHA_OPACITY))  // Camera detection optimized
+                // Alpha channel: use custom opacity value
+                pattern.append(UInt8(opacity))
             }
         }
         

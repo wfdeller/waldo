@@ -28,9 +28,9 @@ class WatermarkEngine {
         return result
     }
     
-    static func extractPhotoResistantWatermark(from image: CGImage) -> String? {
+    static func extractPhotoResistantWatermark(from image: CGImage, threshold: Double = WatermarkConstants.PHOTO_CONFIDENCE_THRESHOLD, verbose: Bool = false) -> String? {
         // Try overlay-specific extraction first (for camera photos of screens)
-        if let overlayResult = extractOverlayWatermark(from: image) {
+        if let overlayResult = extractOverlayWatermark(from: image, threshold: threshold, verbose: verbose) {
             return overlayResult
         }
         
@@ -52,50 +52,160 @@ class WatermarkEngine {
     
     // MARK: - Overlay Watermark Extraction (for camera photos of screens)
     
-    private static func extractOverlayWatermark(from image: CGImage) -> String? {
+    private static func calculateAdaptiveThreshold(_ pixelData: [UInt8], width: Int, height: Int, baseThreshold: Double, verbose: Bool = false) -> Double {
+        if verbose { print(".  Calculating adaptive threshold...") }
+        // Calculate image variance to determine if we should be more/less aggressive
+        var totalVariance: Double = 0
+        var sampleCount = 0
+        let sampleStep = max(1, (width * height) / 1000) // Sample ~1000 pixels
+        if verbose { print(".    Sampling every \(sampleStep) pixels for variance calculation") }
+        
+        for i in stride(from: 0, to: pixelData.count - 4, by: sampleStep * 4) {
+            let _ = Double(pixelData[i])
+            let _ = Double(pixelData[i + 1])  
+            let _ = Double(pixelData[i + 2])
+            
+            // Calculate local variance in a 3x3 window
+            var localPixels: [Double] = []
+            let pixelIndex = i / 4
+            let x = pixelIndex % width
+            let y = pixelIndex / width
+            
+            for dy in -1...1 {
+                for dx in -1...1 {
+                    let nx = x + dx
+                    let ny = y + dy
+                    if nx >= 0 && nx < width && ny >= 0 && ny < height {
+                        let nIndex = (ny * width + nx) * 4
+                        if nIndex + 2 < pixelData.count {
+                            let nr = Double(pixelData[nIndex])
+                            let ng = Double(pixelData[nIndex + 1])
+                            let nb = Double(pixelData[nIndex + 2])
+                            let brightness = (nr + ng + nb) / 3.0
+                            localPixels.append(brightness)
+                        }
+                    }
+                }
+            }
+            
+            if localPixels.count > 1 {
+                let mean = localPixels.reduce(0, +) / Double(localPixels.count)
+                let variance = localPixels.map { pow($0 - mean, 2) }.reduce(0, +) / Double(localPixels.count)
+                totalVariance += variance
+                sampleCount += 1
+            }
+        }
+        
+        let avgVariance = sampleCount > 0 ? totalVariance / Double(sampleCount) : 0
+        
+        if verbose { print(".    Average image variance: \(String(format: "%.2f")) (from \(sampleCount) samples)") }
+        
+        // Lower threshold for low-variance (smooth) images, higher for high-variance (noisy) images
+        let varianceThreshold: Double = 500.0 // Adjust based on testing
+        let thresholdMultiplier = avgVariance < varianceThreshold ? 0.7 : 1.3
+        let adaptiveThreshold = baseThreshold * thresholdMultiplier
+        
+        if verbose { print(".    Image type: \(avgVariance < varianceThreshold ? "smooth" : "noisy")") }
+        if verbose { print(".    Threshold multiplier: \(String(format: "%.1f", thresholdMultiplier))") }
+        if verbose { print(".    Base threshold: \(String(format: "%.3f")) -> Adaptive threshold: \(String(format: "%.3f", adaptiveThreshold))") }
+        
+        return adaptiveThreshold
+    }
+    
+    private static func extractOverlayWatermark(from image: CGImage, threshold: Double = WatermarkConstants.PHOTO_CONFIDENCE_THRESHOLD, verbose: Bool = false) -> String? {
         guard let pixelData = extractPixelData(from: image) else { return nil }
         
         let width = image.width
         let height = image.height
         
-        // Try different tile sizes (camera might scale the overlay)
-        let tileSizes = [16, 32, 48, 64]
+        if verbose { print(".  Trying overlay watermark extraction...") }
+        // Try more aggressive tile sizes (camera might scale the overlay differently)
+        let tileSizes = [8, 12, 16, 24, 32, 40, 48, 56, 64, 80, 96, 128]
         
-        // Sample multiple regions to find the strongest pattern
+        // Sample multiple regions to find the strongest pattern - more comprehensive grid
         var bestResult: String?
         var bestScore = 0.0
         
-        for tileSize in tileSizes {
-            // Try different positions across the image
-            let samplePositions = [
-                (x: width / 8, y: height / 8),
-                (x: width / 4, y: height / 4),
-                (x: width / 2, y: height / 2),
-                (x: 3 * width / 4, y: height / 4),
-                (x: width / 4, y: 3 * height / 4),
-                (x: 3 * width / 4, y: 3 * height / 4),
-                (x: 7 * width / 8, y: 7 * height / 8)
-            ]
+        if verbose { 
+            print("watermark overlay detection starting") 
+            print(".  Image size: \(width)x\(height)") 
+            print(".  Testing \(tileSizes.count) different tile sizes: \(tileSizes)")
+        } else {
+            print("Analyzing image...", terminator: "")
+        }
+
+        for (index, tileSize) in tileSizes.enumerated() {
+            if verbose { 
+                print(".  Trying tile size: \(tileSize)x\(tileSize)") 
+            } else if index % 3 == 0 {
+                print(".", terminator: "")
+                fflush(stdout)
+            }
+            // More aggressive position sampling - 5x5 grid plus corners and edges
+            var samplePositions: [(x: Int, y: Int)] = []
+            
+            // Grid sampling (5x5)
+            for gridY in 0..<5 {
+                for gridX in 0..<5 {
+                    let x = (width * gridX) / 4
+                    let y = (height * gridY) / 4
+                    samplePositions.append((x: x, y: y))
+                }
+            }
+            
+            // Edge sampling
+            let edgeStep = min(width, height) / 10
+            for i in stride(from: 0, to: width - tileSize, by: edgeStep) {
+                samplePositions.append((x: i, y: 0))  // Top edge
+                samplePositions.append((x: i, y: height - tileSize))  // Bottom edge
+            }
+            for i in stride(from: 0, to: height - tileSize, by: edgeStep) {
+                samplePositions.append((x: 0, y: i))  // Left edge  
+                samplePositions.append((x: width - tileSize, y: i))  // Right edge
+            }
+            
+            if verbose { print(".    Generated \(samplePositions.count) sample positions") }
+            var positionCount = 0
             
             for position in samplePositions {
+                positionCount += 1
                 if let (result, score) = extractOverlayPatternAt(pixelData, width: width, height: height, 
-                                                               startX: position.x, startY: position.y, tileSize: tileSize) {
+                                                               startX: position.x, startY: position.y, tileSize: tileSize,
+                                                               scaleFactor: Double(tileSize) / 32.0, verbose: verbose) {
+                    if verbose { print(".      Position \(positionCount)/\(samplePositions.count) (\(position.x),\(position.y)): found pattern '\(result)' with score \(String(format: "%.3f", score))") }
                     if score > bestScore {
+                        if verbose { print(".      *** New best score! Previous: \(String(format: "%.3f", bestScore))") }
                         bestScore = score
                         bestResult = result
                     }
+                } else if verbose && positionCount % 10 == 0 {
+                    print(".      Position \(positionCount)/\(samplePositions.count): no pattern found")
                 }
             }
         }
+        if verbose { print(".  bestResult detected: \(bestResult ?? "nil")") }
+
+        // Adaptive threshold based on image characteristics
+        let adaptiveThreshold = calculateAdaptiveThreshold(pixelData, width: width, height: height, baseThreshold: threshold, verbose: verbose)
         
-        return bestScore > WatermarkConstants.PHOTO_CONFIDENCE_THRESHOLD ? bestResult : nil  
+        if verbose { 
+            print(".  Final score: \(String(format: "%.3f", bestScore)), adaptive threshold: \(String(format: "%.3f", adaptiveThreshold))") 
+        } else {
+            print(" done")
+        }
+        let passed = bestScore > adaptiveThreshold && bestResult != nil && !bestResult!.isEmpty
+        if verbose { print(".  Threshold check: \(passed ? "PASSED" : "FAILED") - \(passed ? "watermark detected" : "no watermark found")") }
+        return passed ? bestResult : nil  
     }
     
     private static func extractOverlayPatternAt(_ pixelData: [UInt8], width: Int, height: Int, 
-                                              startX: Int, startY: Int, tileSize: Int) -> (String, Double)? {
+                                              startX: Int, startY: Int, tileSize: Int, scaleFactor: Double = 1.0, verbose: Bool = false) -> (String, Double)? {
         var extractedBits: [UInt8] = []
         var confidence: Double = 0
         var sampleCount = 0
+        var patternMatches = 0
+        
+        let scaledTolerance = Int(Double(WatermarkConstants.DETECTION_TOLERANCE) * max(0.5, scaleFactor))
         
         // Extract pattern from a tile-sized region
         for y in 0..<tileSize {
@@ -111,6 +221,10 @@ class WatermarkEngine {
                         let r = pixelData[pixelIndex]
                         let g = pixelData[pixelIndex + 1] 
                         let b = pixelData[pixelIndex + 2]
+                        
+                        // Convert to different color spaces for better detection
+                        let (_, _, _) = rgbToHsv(r: Int(r), g: Int(g), b: Int(b))
+                        let (y, _, _) = rgbToYuv(r: Int(r), g: Int(g), b: Int(b))
                         
                         // For camera photos, we need to be more adaptive about the baseline
                         // Calculate local average as baseline (camera color shifts)
@@ -142,25 +256,40 @@ class WatermarkEngine {
                             let gValue = Int(g)
                             let bValue = Int(b)
                             
-                            // Check if pixel values match overlay pattern
-                            let isHighPattern = (
-                                abs(rValue - WatermarkConstants.RGB_HIGH) <= WatermarkConstants.DETECTION_TOLERANCE &&
-                                abs(gValue - WatermarkConstants.RGB_HIGH) <= WatermarkConstants.DETECTION_TOLERANCE &&
-                                abs(bValue - WatermarkConstants.RGB_HIGH) <= WatermarkConstants.DETECTION_TOLERANCE
+                            // Use pre-calculated scaled tolerance
+                            
+                            // Check if pixel values match overlay pattern in RGB space
+                            let isHighPatternRGB = (
+                                abs(rValue - WatermarkConstants.RGB_HIGH) <= scaledTolerance &&
+                                abs(gValue - WatermarkConstants.RGB_HIGH) <= scaledTolerance &&
+                                abs(bValue - WatermarkConstants.RGB_HIGH) <= scaledTolerance
                             )
                             
-                            let isLowPattern = (
-                                abs(rValue - WatermarkConstants.RGB_LOW) <= WatermarkConstants.DETECTION_TOLERANCE &&
-                                abs(gValue - WatermarkConstants.RGB_LOW) <= WatermarkConstants.DETECTION_TOLERANCE &&
-                                abs(bValue - WatermarkConstants.RGB_LOW) <= WatermarkConstants.DETECTION_TOLERANCE
+                            let isLowPatternRGB = (
+                                abs(rValue - WatermarkConstants.RGB_LOW) <= scaledTolerance &&
+                                abs(gValue - WatermarkConstants.RGB_LOW) <= scaledTolerance &&
+                                abs(bValue - WatermarkConstants.RGB_LOW) <= scaledTolerance
                             )
+                            
+                            // Also check in luminance (Y) channel which is more robust to color shifts
+                            let expectedHighY = rgbToYuv(r: WatermarkConstants.RGB_HIGH, g: WatermarkConstants.RGB_HIGH, b: WatermarkConstants.RGB_HIGH).0
+                            let expectedLowY = rgbToYuv(r: WatermarkConstants.RGB_LOW, g: WatermarkConstants.RGB_LOW, b: WatermarkConstants.RGB_LOW).0
+                            
+                            let isHighPatternY = abs(y - expectedHighY) <= scaledTolerance * 2
+                            let isLowPatternY = abs(y - expectedLowY) <= scaledTolerance * 2
+                            
+                            // Combine RGB and luminance detection
+                            let isHighPattern = isHighPatternRGB || isHighPatternY
+                            let isLowPattern = isLowPatternRGB || isLowPatternY
                             
                             if isHighPattern {
                                 extractedBits.append(1)
                                 hasModification = true
+                                patternMatches += 1
                             } else if isLowPattern {
                                 extractedBits.append(0)
                                 hasModification = true
+                                patternMatches += 1
                             } else {
                                 // No clear pattern detected - might be background
                                 extractedBits.append(0)
@@ -181,18 +310,33 @@ class WatermarkEngine {
         
         if sampleCount > 0 {
             confidence /= Double(sampleCount)
+            let patternMatchRate = Double(patternMatches) / Double(sampleCount)
             
-            // Try to decode the extracted pattern
-            if let decoded = decodeOverlayPattern(extractedBits) {
-                return (decoded, confidence)
+            // Only proceed if we have a reasonable pattern match rate
+            if patternMatchRate > 0.1 {
+                // Apply noise filtering to extracted bits
+                let filteredBits = applyNoiseFiltering(extractedBits, tileSize: tileSize, verbose: verbose)
+                
+                // Try to decode the filtered pattern
+                if let decoded = decodeOverlayPattern(filteredBits, verbose: verbose) {
+                    return (decoded, confidence)
+                }
+                
+                // Fallback: try original pattern if filtering failed
+                if let decoded = decodeOverlayPattern(extractedBits, verbose: verbose) {
+                    return (decoded, confidence)
+                }
             }
         }
         
         return nil
     }
     
-    private static func decodeOverlayPattern(_ bits: [UInt8]) -> String? {
-        guard bits.count >= 16 else { return nil }
+    private static func decodeOverlayPattern(_ bits: [UInt8], verbose: Bool = false) -> String? {
+        guard bits.count >= 16 else { 
+            if verbose { print(".        Decode failed: insufficient bits (\(bits.count) < 16)") }
+            return nil 
+        }
         
         // Extract length from first 16 bits (matching overlay encoding)
         var length: UInt16 = 0
@@ -200,7 +344,10 @@ class WatermarkEngine {
             length |= UInt16(bits[i]) << i
         }
         
+        if verbose { print(".        Extracted length: \(length)") }
+        
         guard length > 0 && length <= 8000 else { 
+            if verbose { print(".        Invalid length, trying direct pattern decode...") }
             // Try interpreting the pattern directly without length prefix
             return decodeOverlayPatternDirect(bits)
         }
@@ -223,10 +370,14 @@ class WatermarkEngine {
         }
         
         if let decoded = String(data: Data(bytes), encoding: .utf8) {
+            if verbose { print(".        Decoded raw string: '\(decoded)'") }
             // Remove error correction (every character repeated 3 times)
-            return removeSimpleErrorCorrection(decoded)
+            let final = removeSimpleErrorCorrection(decoded)
+            if verbose { print(".        After error correction: '\(final)'") }
+            return final
         }
         
+        if verbose { print(".        UTF-8 decode failed") }
         return nil
     }
     
@@ -643,7 +794,7 @@ class WatermarkEngine {
     
     private static func extractMicroQRPattern(from image: CGImage) -> String? {
         guard let pixelData = extractPixelData(from: image) else { 
-            print("DEBUG: Failed to extract pixel data")
+            print(".  Failed to extract pixel data")
             return nil 
         }
         
@@ -654,7 +805,7 @@ class WatermarkEngine {
         let startX = width - patternSize - 10
         let startY = 10
         
-        print("DEBUG: Extracting micro QR from position (\(startX), \(startY))")
+        print("Extracting micro QR from position (\(startX), \(startY))")
         
         var extractedPattern: [UInt8] = []
         
@@ -669,17 +820,17 @@ class WatermarkEngine {
                     let avgModification = (Int(r) + Int(g) + Int(b)) / 3
                     extractedPattern.append(avgModification > 1 ? 1 : 0)
                 } else {
-                    print("DEBUG: Pixel index out of bounds: \(pixelIndex)")
+                    print(".  Pixel index out of bounds: \(pixelIndex)")
                     return nil
                 }
             }
         }
         
-        print("DEBUG: Extracted pattern length: \(extractedPattern.count)")
-        print("DEBUG: First 32 bits: \(Array(extractedPattern.prefix(32)))")
+        print(".  Extracted pattern length: \(extractedPattern.count)")
+        print(".  First 32 bits: \(Array(extractedPattern.prefix(32)))")
         
         let result = decodeMicroPattern(extractedPattern)
-        print("DEBUG: Decoded result: \(result ?? "nil")")
+        print(".  Decoded result: \(result ?? "nil")")
         return result
     }
     
@@ -868,6 +1019,130 @@ class WatermarkEngine {
         }
         
         return String(data: Data(bytes), encoding: .utf8)
+    }
+    
+    // MARK: - Color Space Conversions
+    
+    private static func rgbToHsv(r: Int, g: Int, b: Int) -> (h: Int, s: Int, v: Int) {
+        let rf = Double(r) / 255.0
+        let gf = Double(g) / 255.0
+        let bf = Double(b) / 255.0
+        
+        let maxVal = max(rf, gf, bf)
+        let minVal = min(rf, gf, bf)
+        let diff = maxVal - minVal
+        
+        var h: Double = 0
+        let s: Double = maxVal == 0 ? 0 : diff / maxVal
+        let v: Double = maxVal
+        
+        if diff != 0 {
+            if maxVal == rf {
+                h = 60 * ((gf - bf) / diff)
+            } else if maxVal == gf {
+                h = 60 * (2 + (bf - rf) / diff)
+            } else {
+                h = 60 * (4 + (rf - gf) / diff)
+            }
+            if h < 0 { h += 360 }
+        }
+        
+        return (h: Int(h), s: Int(s * 255), v: Int(v * 255))
+    }
+    
+    private static func rgbToYuv(r: Int, g: Int, b: Int) -> (y: Int, u: Int, v: Int) {
+        let rf = Double(r)
+        let gf = Double(g)
+        let bf = Double(b)
+        
+        let y = 0.299 * rf + 0.587 * gf + 0.114 * bf
+        let u = -0.14713 * rf - 0.28886 * gf + 0.436 * bf + 128
+        let v = 0.615 * rf - 0.51499 * gf - 0.10001 * bf + 128
+        
+        return (y: Int(y), u: Int(u), v: Int(v))
+    }
+    
+    // MARK: - Noise Filtering and Signal Enhancement
+    
+    private static func applyNoiseFiltering(_ bits: [UInt8], tileSize: Int, verbose: Bool = false) -> [UInt8] {
+        guard bits.count >= 9 else { 
+            if verbose { print(".        Noise filtering skipped: too few bits (\(bits.count))") }
+            return bits 
+        }
+        
+        if verbose { print(".        Applying noise filtering to \(bits.count) bits...") }
+        var filteredBits = bits
+        let side = tileSize
+        var medianFilterChanges = 0
+        var majorityVoteChanges = 0
+        
+        // Apply median filter to reduce noise
+        for y in 1..<(side - 1) {
+            for x in 1..<(side - 1) {
+                let index = y * side + x
+                if index < bits.count {
+                    var neighbors: [UInt8] = []
+                    
+                    // Collect 3x3 neighborhood
+                    for dy in -1...1 {
+                        for dx in -1...1 {
+                            let neighborIndex = (y + dy) * side + (x + dx)
+                            if neighborIndex >= 0 && neighborIndex < bits.count {
+                                neighbors.append(bits[neighborIndex])
+                            }
+                        }
+                    }
+                    
+                    // Apply median filter
+                    neighbors.sort()
+                    if neighbors.count >= 5 {
+                        let medianValue = neighbors[neighbors.count / 2]
+                        if filteredBits[index] != medianValue {
+                            medianFilterChanges += 1
+                        }
+                        filteredBits[index] = medianValue
+                    }
+                }
+            }
+        }
+        
+        // Apply majority voting in 3x3 windows for error correction
+        var correctedBits = filteredBits
+        for y in 1..<(side - 1) {
+            for x in 1..<(side - 1) {
+                let index = y * side + x
+                if index < filteredBits.count {
+                    var ones = 0
+                    var zeros = 0
+                    
+                    // Count 1s and 0s in 3x3 neighborhood
+                    for dy in -1...1 {
+                        for dx in -1...1 {
+                            let neighborIndex = (y + dy) * side + (x + dx)
+                            if neighborIndex >= 0 && neighborIndex < filteredBits.count {
+                                if filteredBits[neighborIndex] == 1 {
+                                    ones += 1
+                                } else {
+                                    zeros += 1
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Apply majority voting
+                    let newValue: UInt8 = ones > zeros ? 1 : 0
+                    if correctedBits[index] != newValue {
+                        majorityVoteChanges += 1
+                    }
+                    correctedBits[index] = newValue
+                }
+            }
+        }
+        
+        if verbose { print(".        Median filter changed \(medianFilterChanges) bits") }
+        if verbose { print(".        Majority vote changed \(majorityVoteChanges) bits") }
+        
+        return correctedBits
     }
     
     private static func generateMicroPattern(from string: String) -> [UInt8] {

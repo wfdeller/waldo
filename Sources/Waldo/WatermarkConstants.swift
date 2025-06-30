@@ -20,7 +20,7 @@ struct WatermarkConstants {
     
     /// Alpha opacity for overlay visibility (0-255)
     /// Higher values = more visible but more camera-detectable  
-    static let ALPHA_OPACITY: Int = 60     // Balanced for camera detection
+    static let ALPHA_OPACITY: Int = 20     // Minimally intrusive default
     
     // MARK: - Pattern Configuration
     
@@ -64,13 +64,15 @@ struct WatermarkConstants {
     // MARK: - Configuration Notes
     
     /// Camera Detection Optimization:
-    /// - RGB_DELTA of 30 provides 12% signal strength for camera detection
-    /// - ALPHA_OPACITY of 80 provides 31% visibility for camera sensors
+    /// - RGB_DELTA of 25 provides 10% signal strength for camera detection
+    /// - ALPHA_OPACITY of 20 provides 8% visibility (minimally intrusive)
+    /// - Primary detection relies on RGB patterns, not alpha opacity
     /// - Values can be increased for stronger watermarks or decreased for subtlety
     ///
     /// Tuning Guidelines:
-    /// - Increase RGB_DELTA (30→40→50) for better camera detection
-    /// - Increase ALPHA_OPACITY (80→100→120) for more visible patterns
+    /// - Increase RGB_DELTA (25→35→45) for better camera detection
+    /// - Increase ALPHA_OPACITY (20→40→60) for more visible patterns
     /// - Adjust PATTERN_SIZE (64→128) for different detection scales
     /// - Keep DETECTION_THRESHOLD < RGB_DELTA for reliable extraction
+    /// - Use --opacity parameter in CLI to override default for specific needs
 }

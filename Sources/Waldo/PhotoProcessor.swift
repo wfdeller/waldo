@@ -21,14 +21,14 @@ class PhotoProcessor {
         return image
     }
     
-    static func extractWatermarkFromPhoto(at url: URL) -> (userID: String, watermark: String, timestamp: TimeInterval)? {
+    static func extractWatermarkFromPhoto(at url: URL, threshold: Double = WatermarkConstants.PHOTO_CONFIDENCE_THRESHOLD, verbose: Bool = false) -> (userID: String, watermark: String, timestamp: TimeInterval)? {
         guard let image = loadImage(from: url) else {
             print("Failed to load image from: \(url)")
             return nil
         }
         
         // Try robust extraction first (for camera photos)
-        if let robustResult = WatermarkEngine.extractPhotoResistantWatermark(from: image) {
+        if let robustResult = WatermarkEngine.extractPhotoResistantWatermark(from: image, threshold: threshold, verbose: verbose) {
             return parseWatermark(robustResult)
         }
         
@@ -36,14 +36,14 @@ class PhotoProcessor {
         return SteganographyEngine.extractWatermark(from: image)
     }
     
-    static func extractWatermarkFromPhotoData(_ data: Data) -> (userID: String, watermark: String, timestamp: TimeInterval)? {
+    static func extractWatermarkFromPhotoData(_ data: Data, threshold: Double = WatermarkConstants.PHOTO_CONFIDENCE_THRESHOLD) -> (userID: String, watermark: String, timestamp: TimeInterval)? {
         guard let image = loadImage(from: data) else {
             print("Failed to load image from data")
             return nil
         }
         
         // Try robust extraction first (for camera photos)
-        if let robustResult = WatermarkEngine.extractPhotoResistantWatermark(from: image) {
+        if let robustResult = WatermarkEngine.extractPhotoResistantWatermark(from: image, threshold: threshold) {
             return parseWatermark(robustResult)
         }
         

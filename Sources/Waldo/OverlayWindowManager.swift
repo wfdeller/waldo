@@ -6,6 +6,7 @@ class OverlayWindowManager: NSObject {
     private var watermarkViews: [NSScreen: WatermarkOverlayView] = [:]
     private var refreshTimer: Timer?
     private var isActive = false
+    private var currentOpacity: Int = WatermarkConstants.ALPHA_OPACITY
     
     static let shared = OverlayWindowManager()
     
@@ -19,14 +20,16 @@ class OverlayWindowManager: NSObject {
         NotificationCenter.default.removeObserver(self)
     }
     
-    func startOverlays() {
+    func startOverlays(opacity: Int = WatermarkConstants.ALPHA_OPACITY) {
         guard !isActive else { return }
         
+        currentOpacity = opacity
         isActive = true
-        createOverlayWindows()
+        createOverlayWindows(opacity: opacity)
         startRefreshTimer()
         
         print("✓ Desktop overlay watermarking started on \(NSScreen.screens.count) display(s)")
+        print("✓ Overlay opacity: \(opacity)/255 (≈\(Int(round(Double(opacity) / 255.0 * 100)))%)")
     }
     
     func stopOverlays() {
@@ -45,7 +48,7 @@ class OverlayWindowManager: NSObject {
         let newWatermarkData = SystemInfo.getWatermarkDataWithHourlyTimestamp()
         
         for (_, view) in watermarkViews {
-            view.updateWatermarkData(newWatermarkData)
+            view.updateWatermarkData(newWatermarkData, opacity: currentOpacity)
         }
         
         print("✓ Watermark overlay refreshed at \(SystemInfo.getFormattedTimestamp())")
@@ -79,15 +82,15 @@ class OverlayWindowManager: NSObject {
         return status
     }
     
-    private func createOverlayWindows() {
+    private func createOverlayWindows(opacity: Int = WatermarkConstants.ALPHA_OPACITY) {
         removeAllOverlayWindows()
         
         for screen in NSScreen.screens {
-            createOverlayWindow(for: screen)
+            createOverlayWindow(for: screen, opacity: opacity)
         }
     }
     
-    private func createOverlayWindow(for screen: NSScreen) {
+    private func createOverlayWindow(for screen: NSScreen, opacity: Int = WatermarkConstants.ALPHA_OPACITY) {
         let frame = screen.frame
         let visibleFrame = screen.visibleFrame
         let backingScaleFactor = screen.backingScaleFactor
@@ -114,7 +117,7 @@ class OverlayWindowManager: NSObject {
         window.setFrame(overlayFrame, display: true)
         
         let watermarkView = WatermarkOverlayView(frame: NSRect(origin: .zero, size: overlayFrame.size))
-        watermarkView.updateWatermarkData(SystemInfo.getWatermarkDataWithHourlyTimestamp())
+        watermarkView.updateWatermarkData(SystemInfo.getWatermarkDataWithHourlyTimestamp(), opacity: opacity)
         
         window.contentView = watermarkView
         window.orderFront(nil)
@@ -214,7 +217,7 @@ class OverlayWindowManager: NSObject {
         guard isActive else { return }
         
         print("Screen configuration changed, updating overlays...")
-        createOverlayWindows()
+        createOverlayWindows(opacity: currentOpacity)
         
     }
     
