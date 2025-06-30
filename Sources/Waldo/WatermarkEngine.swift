@@ -88,7 +88,7 @@ class WatermarkEngine {
             }
         }
         
-        return bestScore > 0.8 ? bestResult : nil  // Require high confidence for camera photos
+        return bestScore > WatermarkConstants.PHOTO_CONFIDENCE_THRESHOLD ? bestResult : nil  
     }
     
     private static func extractOverlayPatternAt(_ pixelData: [UInt8], width: Int, height: Int, 

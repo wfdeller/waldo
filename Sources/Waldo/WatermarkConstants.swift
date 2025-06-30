@@ -6,6 +6,9 @@ import Cocoa
 /// Ensures consistency between overlay generation and camera detection
 struct WatermarkConstants {
     
+    /// Photo Confidence Threshold
+    static let PHOTO_CONFIDENCE_THRESHOLD = 0.8
+    
     // MARK: - RGB Encoding Values
     
     /// Base RGB value for watermark patterns (mid-gray)

@@ -193,7 +193,7 @@ class OverlayWindowManager: NSObject {
             }
         }
         
-        print("Next watermark refresh scheduled for: \(nextHour)")
+        print(".  Next watermark refresh scheduled for: \(nextHour)")
     }
     
     private func stopRefreshTimer() {
@@ -227,7 +227,25 @@ class OverlayWindowManager: NSObject {
         task.standardOutput = pipe
         task.standardError = Pipe()
         task.launch()
-        task.waitUntilExit()
+        
+        // Add timeout to prevent hanging
+        let semaphore = DispatchSemaphore(value: 0)
+        var taskCompleted = false
+        
+        DispatchQueue.global(qos: .utility).async {
+            task.waitUntilExit()
+            taskCompleted = true
+            semaphore.signal()
+        }
+        
+        // Wait up to 3 seconds for the process to complete
+        let timeout = DispatchTime.now() + .seconds(3)
+        if semaphore.wait(timeout: timeout) == .timedOut {
+            task.terminate()
+            return false // Assume no daemon running if we can't determine
+        }
+        
+        guard taskCompleted else { return false }
         
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         guard let output = String(data: data, encoding: .utf8) else { return false }

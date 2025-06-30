@@ -191,12 +191,74 @@ struct StopOverlayCommand: ParsableCommand {
     func run() throws {
         let manager = OverlayWindowManager.shared
         
-        if manager.getStatus()["active"] as? Bool == false {
-            print("No overlay is currently running.")
-            return
+        // First try to stop local overlays (if running in same process)
+        manager.stopOverlays()
+        
+        // Check for and terminate any waldo overlay start processes
+        // (whether daemon or interactive) - this bypasses getStatus() issues
+        let terminatedCount = terminateOverlayProcesses()
+        
+        if terminatedCount == 0 {
+            print("No overlay processes are currently running.")
+        }
+    }
+    
+    private func terminateOverlayProcesses() -> Int {
+        // Use pgrep to find waldo processes - faster and more reliable than ps
+        let task = Process()
+        task.launchPath = "/usr/bin/pgrep"
+        task.arguments = ["-f", "waldo overlay start"]
+        
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError = Pipe()
+        task.launch()
+        
+        // Add timeout to prevent hanging
+        let semaphore = DispatchSemaphore(value: 0)
+        var taskCompleted = false
+        
+        DispatchQueue.global(qos: .utility).async {
+            task.waitUntilExit()
+            taskCompleted = true
+            semaphore.signal()
         }
         
-        manager.stopOverlays()
+        let timeout = DispatchTime.now() + .seconds(3)
+        if semaphore.wait(timeout: timeout) == .timedOut {
+            task.terminate()
+            print("Warning: Could not find overlay processes (pgrep timeout)")
+            return 0
+        }
+        
+        guard taskCompleted else {
+            print("Warning: Could not find overlay processes")
+            return 0
+        }
+        
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        guard let output = String(data: data, encoding: .utf8) else {
+            return 0
+        }
+        
+        // Parse PIDs and terminate processes
+        let currentPID = ProcessInfo.processInfo.processIdentifier
+        let pidStrings = output.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: .newlines)
+        var terminatedCount = 0
+        
+        for pidString in pidStrings {
+            if let pid = Int32(pidString.trimmingCharacters(in: .whitespaces)), pid != currentPID {
+                // Send SIGTERM signal to gracefully stop the process
+                if kill(pid, SIGTERM) == 0 {
+                    terminatedCount += 1
+                    print("✓ Terminated waldo overlay process (PID: \(pid))")
+                } else {
+                    print("Warning: Could not terminate waldo overlay process (PID: \(pid))")
+                }
+            }
+        }
+        
+        return terminatedCount
     }
 }
 
