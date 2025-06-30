@@ -4,6 +4,7 @@ import Accelerate
 
 class WatermarkEngine {
     
+    
     // MARK: - Public Interface
     
     static func embedPhotoResistantWatermark(in image: CGImage, data: String) -> CGImage? {
@@ -135,18 +136,35 @@ class WatermarkEngine {
                         var hasModification = false
                         
                         if count > 0 {
-                            let avgR = localR / count
-                            let avgG = localG / count
-                            let avgB = localB / count
+                            // Look for variations that match overlay encoding
+                            // Overlay uses: base+delta for 1-bits, base+0 for 0-bits
+                            let rValue = Int(r)
+                            let gValue = Int(g)
+                            let bValue = Int(b)
                             
-                            // Look for variations from local average
-                            let diffR = abs(Int(r) - avgR)
-                            let diffG = abs(Int(g) - avgG)
-                            let diffB = abs(Int(b) - avgB)
+                            // Check if pixel values match overlay pattern
+                            let isHighPattern = (
+                                abs(rValue - WatermarkConstants.RGB_HIGH) <= WatermarkConstants.DETECTION_TOLERANCE &&
+                                abs(gValue - WatermarkConstants.RGB_HIGH) <= WatermarkConstants.DETECTION_TOLERANCE &&
+                                abs(bValue - WatermarkConstants.RGB_HIGH) <= WatermarkConstants.DETECTION_TOLERANCE
+                            )
                             
-                            // More sensitive detection for camera photos
-                            hasModification = diffR >= 1 || diffG >= 1 || diffB >= 1
-                            extractedBits.append(hasModification ? 1 : 0)
+                            let isLowPattern = (
+                                abs(rValue - WatermarkConstants.RGB_LOW) <= WatermarkConstants.DETECTION_TOLERANCE &&
+                                abs(gValue - WatermarkConstants.RGB_LOW) <= WatermarkConstants.DETECTION_TOLERANCE &&
+                                abs(bValue - WatermarkConstants.RGB_LOW) <= WatermarkConstants.DETECTION_TOLERANCE
+                            )
+                            
+                            if isHighPattern {
+                                extractedBits.append(1)
+                                hasModification = true
+                            } else if isLowPattern {
+                                extractedBits.append(0)
+                                hasModification = true
+                            } else {
+                                // No clear pattern detected - might be background
+                                extractedBits.append(0)
+                            }
                         } else {
                             extractedBits.append(0)
                         }

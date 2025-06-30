@@ -103,7 +103,7 @@ class OverlayWindowManager: NSObject {
             screen: screen
         )
         
-        window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.normalWindow)) - 1)
+        window.level = WatermarkConstants.overlayWindowLevel
         window.backgroundColor = NSColor.clear
         window.isOpaque = false
         window.ignoresMouseEvents = true

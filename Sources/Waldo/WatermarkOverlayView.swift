@@ -2,6 +2,7 @@ import Cocoa
 import CoreGraphics
 
 class WatermarkOverlayView: NSView {
+    
     var watermarkData: String = "" {
         didSet {
             needsDisplay = true
@@ -9,7 +10,7 @@ class WatermarkOverlayView: NSView {
     }
     
     private var watermarkPattern: [UInt8] = []
-    private let patternSize = 64
+    private let patternSize = WatermarkConstants.PATTERN_SIZE
     
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -47,7 +48,7 @@ class WatermarkOverlayView: NSView {
             
             if i % 4 < 3 {
                 // RGB channels: embed camera-detectable patterns
-                let baseValue: UInt8 = 128
+                let baseValue: UInt8 = UInt8(WatermarkConstants.RGB_BASE)
                 
                 // Get bits from micro QR pattern
                 let microBit = microPattern[pixelIndex % microPattern.count]
@@ -55,12 +56,12 @@ class WatermarkOverlayView: NSView {
                 // Get bits from redundant pattern  
                 let redundantBit = redundantPattern[pixelIndex % redundantPattern.count]
                 
-                // Combine patterns with more visible modifications for testing (±10 levels)
-                let modification: UInt8 = (microBit == 1 || redundantBit == 1) ? 10 : 0
+                // Combine patterns with camera-optimized modifications
+                let modification: UInt8 = (microBit == 1 || redundantBit == 1) ? UInt8(WatermarkConstants.RGB_DELTA) : 0
                 pattern.append(baseValue + modification)
             } else {
-                // Alpha channel: more visible for testing
-                pattern.append(25)  // More visible for camera detection testing
+                // Alpha channel: camera detection optimized
+                pattern.append(UInt8(WatermarkConstants.ALPHA_OPACITY))  // Camera detection optimized
             }
         }
         
