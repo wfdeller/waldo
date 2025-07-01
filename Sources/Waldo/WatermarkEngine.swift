@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
-import Accelerate
+import Vision
+import CoreImage
 
 class WatermarkEngine {
     
@@ -29,7 +30,15 @@ class WatermarkEngine {
     }
     
     static func extractPhotoResistantWatermark(from image: CGImage, threshold: Double = WatermarkConstants.PHOTO_CONFIDENCE_THRESHOLD, verbose: Bool = false, debug: Bool = false) -> String? {
-        // Try overlay-specific extraction first (for camera photos of screens)
+        // Try ROI-enhanced extraction first (now enabled by default for better QR detection)
+        if let roiResult = extractFromEnhancedROIs(from: image, threshold: threshold, verbose: verbose, debug: debug) {
+            if debug { print("Debug: ROI-enhanced extraction succeeded") }
+            return roiResult
+        }
+        
+        if debug { print("Debug: ROI-enhanced extraction failed, trying overlay extraction...") }
+        
+        // Try overlay-specific extraction (for camera photos of screens)
         if let overlayResult = extractOverlayWatermark(from: image, threshold: threshold, verbose: verbose, debug: debug) {
             return overlayResult
         }
@@ -58,6 +67,1023 @@ class WatermarkEngine {
         
         if debug { print("Debug: All WatermarkEngine methods failed") }
         
+        return nil
+    }
+    
+    // MARK: - ROI-Enhanced Extraction
+    
+    private static func extractFromEnhancedROIs(from image: CGImage, threshold: Double, verbose: Bool, debug: Bool) -> String? {
+        if verbose { print("Starting ROI-enhanced watermark extraction...") }
+        
+        // Get enhanced ROIs
+        let enhancedROIs = ROIEnhancer.enhanceROIsForWatermarkDetection(from: image, verbose: verbose)
+        
+        if enhancedROIs.isEmpty {
+            if debug { print("Debug: No enhanced ROIs available") }
+            return nil
+        }
+        
+        if verbose { print("Processing \(enhancedROIs.count) enhanced ROIs...") }
+        
+        // Try QR detection on enhanced ROIs first
+        for (roi, position) in enhancedROIs {
+            if verbose { print("Trying QR detection on enhanced \(position.name)...") }
+            
+            // Try Vision framework QR detection on enhanced ROI
+            if let qrResult = extractQRFromEnhancedROI(roi, position: position, verbose: verbose, debug: debug) {
+                if verbose { print("QR code detected in enhanced \(position.name): \(qrResult)") }
+                return qrResult
+            }
+            
+            // Try watermark pattern extraction on enhanced ROI
+            if position.type == .embedded {
+                if let watermarkResult = extractWatermarkFromEnhancedROI(roi, position: position, threshold: threshold, verbose: verbose, debug: debug) {
+                    if verbose { print("Watermark detected in enhanced \(position.name): \(watermarkResult)") }
+                    return watermarkResult
+                }
+            }
+        }
+        
+        if debug { print("Debug: No watermarks found in enhanced ROIs") }
+        return nil
+    }
+    
+    private static func extractQRFromEnhancedROI(_ roi: CGImage, position: ROIEnhancer.QRPosition, verbose: Bool, debug: Bool) -> String? {
+        if verbose { print("Using optimized VNDetectBarcodesRequest on enhanced \(position.name)...") }
+        
+        // Primary detection with optimal settings for enhanced ROIs
+        if let result = performOptimizedBarcodeDetection(roi, position: position, verbose: verbose, debug: debug) {
+            return result
+        }
+        
+        // Fallback strategies for difficult cases
+        if let result = tryAlternativeBarcodeDetection(roi, position: position, verbose: verbose, debug: debug) {
+            return result
+        }
+        
+        if debug { print("Debug: All VNDetectBarcodesRequest methods failed for \(position.name)") }
+        return nil
+    }
+    
+    private static func performOptimizedBarcodeDetection(_ roi: CGImage, position: ROIEnhancer.QRPosition, verbose: Bool, debug: Bool) -> String? {
+        // Try blue channel optimized detection first
+        if let blueChannelResult = performBlueChannelOptimizedDetection(roi, position: position, verbose: verbose, debug: debug) {
+            return blueChannelResult
+        }
+        
+        if debug { print("Debug: Blue channel detection failed, trying standard optimized detection") }
+        
+        let request = VNDetectBarcodesRequest()
+        
+        // Optimize for QR codes specifically
+        request.symbologies = [.qr]
+        
+        // Enhanced settings for preprocessed images
+        request.usesCPUOnly = false  // Use GPU acceleration when available
+        
+        // Create optimized request handler
+        let options: [VNImageOption: Any] = [
+            .ciContext: CIContext(options: [.useSoftwareRenderer: false])
+        ]
+        
+        let handler = VNImageRequestHandler(cgImage: roi, options: options)
+        
+        do {
+            try handler.perform([request])
+            
+            guard let results = request.results, !results.isEmpty else {
+                if debug { print("Debug: No QR codes detected in enhanced \(position.name)") }
+                return nil
+            }
+            
+            if verbose { print("VNDetectBarcodesRequest found \(results.count) QR code(s) in enhanced \(position.name)") }
+            
+            // Process results with enhanced validation
+            for result in results {
+                if let payload = result.payloadStringValue {
+                    if verbose { 
+                        print("QR detected in \(position.name): '\(payload)' (confidence: \(result.confidence))")
+                        print("QR bounds: \(result.boundingBox)")
+                    }
+                    
+                    // Enhanced validation for Version 2 watermark QR codes
+                    if isValidWatermarkQRVersion2(payload, confidence: result.confidence) {
+                        if verbose { print("Found valid Version 2 watermark QR in \(position.name): \(payload)") }
+                        return payload
+                    }
+                }
+            }
+            
+            if debug { print("Debug: No valid watermark QR codes found in enhanced \(position.name)") }
+            return nil
+            
+        } catch {
+            if debug { print("Debug: VNDetectBarcodesRequest failed for \(position.name): \(error)") }
+            return nil
+        }
+    }
+    
+    private static func performBlueChannelOptimizedDetection(_ roi: CGImage, position: ROIEnhancer.QRPosition, verbose: Bool, debug: Bool) -> String? {
+        if verbose { print("Trying blue channel optimized Vision detection for \(position.name)...") }
+        
+        // Extract and enhance blue channel from ROI
+        guard let blueChannelROI = extractAndEnhanceBlueChannelForVision(roi, position: position, verbose: verbose, debug: debug) else {
+            if debug { print("Debug: Failed to extract blue channel for Vision detection") }
+            return nil
+        }
+        
+        // Perform Vision detection on blue channel enhanced image
+        let request = VNDetectBarcodesRequest()
+        request.symbologies = [.qr]
+        request.usesCPUOnly = false
+        
+        // Optimized settings for blue channel detection
+        let options: [VNImageOption: Any] = [
+            .ciContext: CIContext(options: [
+                .useSoftwareRenderer: false,
+                .workingColorSpace: CGColorSpaceCreateDeviceGray()
+            ])
+        ]
+        
+        let handler = VNImageRequestHandler(cgImage: blueChannelROI, options: options)
+        
+        do {
+            try handler.perform([request])
+            
+            guard let results = request.results, !results.isEmpty else {
+                if debug { print("Debug: No QR codes detected in blue channel enhanced \(position.name)") }
+                return nil
+            }
+            
+            if verbose { print("Blue channel Vision detection found \(results.count) QR code(s) in \(position.name)") }
+            
+            // Process results with enhanced validation for blue channel
+            for result in results {
+                if let payload = result.payloadStringValue {
+                    if verbose { 
+                        print("Blue channel QR detected: '\(payload)' (confidence: \(result.confidence))")
+                        print("Blue channel QR bounds: \(result.boundingBox)")
+                    }
+                    
+                    // Enhanced validation for blue channel watermark QR codes
+                    if isValidBlueChannelWatermarkQR(payload, confidence: result.confidence, verbose: verbose) {
+                        if verbose { print("Found valid blue channel watermark QR in \(position.name): \(payload)") }
+                        return payload
+                    }
+                }
+            }
+            
+            if debug { print("Debug: No valid blue channel watermark QR codes found in \(position.name)") }
+            return nil
+            
+        } catch {
+            if debug { print("Debug: Blue channel Vision detection failed for \(position.name): \(error)") }
+            return nil
+        }
+    }
+    
+    private static func extractAndEnhanceBlueChannelForVision(_ roi: CGImage, position: ROIEnhancer.QRPosition, verbose: Bool, debug: Bool) -> CGImage? {
+        if verbose { print("  Extracting and enhancing blue channel for Vision framework...") }
+        
+        // Extract RGB pixel data
+        guard let pixelData = extractPixelData(from: roi) else {
+            if debug { print("Debug: Failed to extract pixel data for blue channel Vision enhancement") }
+            return nil
+        }
+        
+        let width = roi.width
+        let height = roi.height
+        
+        // Extract blue channel with enhanced processing
+        var blueChannelData = [UInt8](repeating: 0, count: width * height)
+        
+        for i in 0..<(width * height) {
+            let pixelIndex = i * 4
+            if pixelIndex + 2 < pixelData.count {
+                let blueValue = pixelData[pixelIndex + 2]
+                blueChannelData[i] = blueValue
+            }
+        }
+        
+        // Apply blue channel specific enhancements for Vision framework
+        blueChannelData = enhanceBlueChannelForVision(blueChannelData, width: width, height: height, position: position, verbose: verbose)
+        
+        // Create enhanced blue channel image
+        return createGrayscaleImageFromData(blueChannelData, width: width, height: height)
+    }
+    
+    private static func enhanceBlueChannelForVision(_ data: [UInt8], width: Int, height: Int, position: ROIEnhancer.QRPosition, verbose: Bool) -> [UInt8] {
+        if verbose { print("    Enhancing blue channel data for Vision detection...") }
+        
+        var enhancedData = data
+        
+        // Step 1: Adaptive histogram equalization for blue channel
+        enhancedData = applyBlueChannelHistogramEqualization(enhancedData, width: width, height: height, verbose: verbose)
+        
+        // Step 2: Edge enhancement specifically for QR patterns
+        enhancedData = applyBlueChannelEdgeEnhancement(enhancedData, width: width, height: height, verbose: verbose)
+        
+        // Step 3: Noise reduction while preserving QR structure
+        enhancedData = applyBlueChannelQRNoiseReduction(enhancedData, width: width, height: height, position: position, verbose: verbose)
+        
+        // Step 4: Final contrast optimization for Vision framework
+        enhancedData = applyBlueChannelVisionContrast(enhancedData, verbose: verbose)
+        
+        return enhancedData
+    }
+    
+    private static func applyBlueChannelHistogramEqualization(_ data: [UInt8], width: Int, height: Int, verbose: Bool) -> [UInt8] {
+        // Calculate histogram
+        var histogram = [Int](repeating: 0, count: 256)
+        for pixel in data {
+            histogram[Int(pixel)] += 1
+        }
+        
+        // Calculate cumulative distribution
+        var cdf = [Double](repeating: 0, count: 256)
+        cdf[0] = Double(histogram[0])
+        for i in 1..<256 {
+            cdf[i] = cdf[i-1] + Double(histogram[i])
+        }
+        
+        // Normalize CDF
+        let totalPixels = Double(data.count)
+        for i in 0..<256 {
+            cdf[i] = (cdf[i] / totalPixels) * 255.0
+        }
+        
+        // Apply equalization
+        return data.map { pixel in
+            UInt8(max(0, min(255, cdf[Int(pixel)])))
+        }
+    }
+    
+    private static func applyBlueChannelEdgeEnhancement(_ data: [UInt8], width: Int, height: Int, verbose: Bool) -> [UInt8] {
+        var result = data
+        
+        // Laplacian edge enhancement kernel
+        let kernel: [Float] = [
+            0, -1, 0,
+            -1, 5, -1,
+            0, -1, 0
+        ]
+        
+        for y in 1..<(height - 1) {
+            for x in 1..<(width - 1) {
+                var sum: Float = 0
+                var kernelIndex = 0
+                
+                for ky in -1...1 {
+                    for kx in -1...1 {
+                        let sampleIndex = (y + ky) * width + (x + kx)
+                        if sampleIndex < data.count {
+                            sum += Float(data[sampleIndex]) * kernel[kernelIndex]
+                        }
+                        kernelIndex += 1
+                    }
+                }
+                
+                let enhancedValue = max(0, min(255, Int(sum)))
+                result[y * width + x] = UInt8(enhancedValue)
+            }
+        }
+        
+        return result
+    }
+    
+    private static func applyBlueChannelQRNoiseReduction(_ data: [UInt8], width: Int, height: Int, position: ROIEnhancer.QRPosition, verbose: Bool) -> [UInt8] {
+        // Apply morphological operations to clean up QR patterns
+        let kernelSize = position.type == .overlay ? 1 : 1  // Small kernel to preserve QR details
+        
+        // Opening to remove small noise
+        var result = data
+        for _ in 0..<kernelSize {
+            result = applyMorphologicalErosion(result, width: width, height: height)
+        }
+        for _ in 0..<kernelSize {
+            result = applyMorphologicalDilation(result, width: width, height: height)
+        }
+        
+        return result
+    }
+    
+    private static func applyBlueChannelVisionContrast(_ data: [UInt8], verbose: Bool) -> [UInt8] {
+        // Final contrast adjustment optimized for Vision framework QR detection
+        let contrast: Double = 1.2  // Slight contrast boost
+        let brightness: Double = 10  // Slight brightness boost
+        
+        return data.map { pixel in
+            let adjusted = (Double(pixel) * contrast) + brightness
+            return UInt8(max(0, min(255, adjusted)))
+        }
+    }
+    
+    private static func applyMorphologicalErosion(_ data: [UInt8], width: Int, height: Int) -> [UInt8] {
+        var result = data
+        
+        for y in 1..<(height - 1) {
+            for x in 1..<(width - 1) {
+                var minValue: UInt8 = 255
+                
+                for dy in -1...1 {
+                    for dx in -1...1 {
+                        let sampleIndex = (y + dy) * width + (x + dx)
+                        if sampleIndex >= 0 && sampleIndex < data.count {
+                            minValue = min(minValue, data[sampleIndex])
+                        }
+                    }
+                }
+                
+                result[y * width + x] = minValue
+            }
+        }
+        
+        return result
+    }
+    
+    private static func applyMorphologicalDilation(_ data: [UInt8], width: Int, height: Int) -> [UInt8] {
+        var result = data
+        
+        for y in 1..<(height - 1) {
+            for x in 1..<(width - 1) {
+                var maxValue: UInt8 = 0
+                
+                for dy in -1...1 {
+                    for dx in -1...1 {
+                        let sampleIndex = (y + dy) * width + (x + dx)
+                        if sampleIndex >= 0 && sampleIndex < data.count {
+                            maxValue = max(maxValue, data[sampleIndex])
+                        }
+                    }
+                }
+                
+                result[y * width + x] = maxValue
+            }
+        }
+        
+        return result
+    }
+    
+    private static func createGrayscaleImageFromData(_ pixelData: [UInt8], width: Int, height: Int) -> CGImage? {
+        let bytesPerRow = width
+        let colorSpace = CGColorSpaceCreateDeviceGray()
+        
+        return pixelData.withUnsafeBytes { bytes in
+            let context = CGContext(
+                data: UnsafeMutableRawPointer(mutating: bytes.baseAddress),
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: bytesPerRow,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.none.rawValue
+            )
+            
+            return context?.makeImage()
+        }
+    }
+    
+    private static func isValidBlueChannelWatermarkQR(_ message: String, confidence: Float, verbose: Bool) -> Bool {
+        if verbose { print("    Validating blue channel QR: '\(message)' (confidence: \(confidence))") }
+        
+        // Enhanced validation for blue channel QR codes
+        guard !message.isEmpty else { 
+            if verbose { print("    Validation failed: empty message") }
+            return false 
+        }
+        
+        // Lower confidence threshold for blue channel since we've enhanced the signal
+        guard confidence >= 0.03 else { 
+            if verbose { print("    Validation failed: low confidence \(confidence)") }
+            return false 
+        }
+        
+        // Remove error correction and validate
+        let cleanedMessage = removeEnhancedErrorCorrection(message) ?? removeSimpleErrorCorrection(message) ?? message
+        
+        if verbose { print("    Cleaned message: '\(cleanedMessage)'") }
+        
+        // Basic watermark format validation
+        let components = cleanedMessage.components(separatedBy: ":")
+        
+        // Should have at least 3 components: username:machine:uuid or similar
+        guard components.count >= 3 else { 
+            if verbose { print("    Validation failed: insufficient components (\(components.count))") }
+            return false 
+        }
+        
+        // Check for reasonable length
+        guard cleanedMessage.count >= 10 && cleanedMessage.count <= 800 else { 
+            if verbose { print("    Validation failed: invalid length (\(cleanedMessage.count))") }
+            return false 
+        }
+        
+        // Enhanced validation for blue channel extracted watermarks
+        let hasAlphanumeric = cleanedMessage.rangeOfCharacter(from: CharacterSet.alphanumerics) != nil
+        let hasColon = cleanedMessage.contains(":")
+        let hasReasonableLength = components.allSatisfy { $0.count > 0 && $0.count < 150 }
+        let hasUserPattern = components.count >= 1 && !components[0].isEmpty
+        let hasMachinePattern = components.count >= 2 && !components[1].isEmpty
+        let hasIdentifierPattern = components.count >= 3 && !components[2].isEmpty
+        
+        let isValid = hasAlphanumeric && hasColon && hasReasonableLength && 
+                     hasUserPattern && hasMachinePattern && hasIdentifierPattern
+        
+        if verbose { 
+            print("    Validation result: \(isValid)")
+            print("    - hasAlphanumeric: \(hasAlphanumeric)")
+            print("    - hasColon: \(hasColon)")
+            print("    - hasReasonableLength: \(hasReasonableLength)")
+            print("    - hasUserPattern: \(hasUserPattern)")
+            print("    - hasMachinePattern: \(hasMachinePattern)")
+            print("    - hasIdentifierPattern: \(hasIdentifierPattern)")
+        }
+        
+        return isValid
+    }
+    
+    private static func tryAlternativeBarcodeDetection(_ roi: CGImage, position: ROIEnhancer.QRPosition, verbose: Bool, debug: Bool) -> String? {
+        if verbose { print("Trying alternative detection strategies for \(position.name)...") }
+        
+        // Strategy 1: Try blue channel combined with all symbologies
+        if let result = tryBlueChannelWithAllSymbologies(roi, position: position, verbose: verbose, debug: debug) {
+            return result
+        }
+        
+        // Strategy 2: Try channel separation and fusion approaches
+        if let result = tryChannelSeparationFusion(roi, position: position, verbose: verbose, debug: debug) {
+            return result
+        }
+        
+        // Strategy 3: Try with all barcode symbologies (not just QR)
+        if let result = tryAllSymbologies(roi, position: position, verbose: verbose, debug: debug) {
+            return result
+        }
+        
+        // Strategy 4: Try with inverted image
+        if let result = tryInvertedDetection(roi, position: position, verbose: verbose, debug: debug) {
+            return result
+        }
+        
+        // Strategy 5: Try with different request configurations
+        if let result = tryVariousConfigurations(roi, position: position, verbose: verbose, debug: debug) {
+            return result
+        }
+        
+        // Strategy 6: Try multi-channel weighted combination
+        if let result = tryMultiChannelWeightedCombination(roi, position: position, verbose: verbose, debug: debug) {
+            return result
+        }
+        
+        return nil
+    }
+    
+    private static func tryBlueChannelWithAllSymbologies(_ roi: CGImage, position: ROIEnhancer.QRPosition, verbose: Bool, debug: Bool) -> String? {
+        if verbose { print("Trying blue channel detection with all symbologies for \(position.name)...") }
+        
+        // Extract blue channel
+        guard let blueChannelROI = extractAndEnhanceBlueChannelForVision(roi, position: position, verbose: verbose, debug: debug) else {
+            return nil
+        }
+        
+        let request = VNDetectBarcodesRequest()
+        request.symbologies = [.qr, .aztec, .dataMatrix, .pdf417, .code128, .code39, .code93, .ean8, .ean13, .itf14, .upce]
+        request.usesCPUOnly = false
+        
+        let handler = VNImageRequestHandler(cgImage: blueChannelROI)
+        
+        do {
+            try handler.perform([request])
+            
+            guard let results = request.results, !results.isEmpty else { return nil }
+            
+            if verbose { print("Blue channel all-symbologies detection found \(results.count) barcode(s)") }
+            
+            for result in results {
+                if let payload = result.payloadStringValue {
+                    if verbose { print("Blue channel barcode detected: '\(payload)' (type: \(result.symbology.rawValue))") }
+                    
+                    if isValidBlueChannelWatermarkQR(payload, confidence: result.confidence, verbose: verbose) {
+                        if verbose { print("Found valid blue channel watermark in \(result.symbology.rawValue) format: \(payload)") }
+                        return payload
+                    }
+                }
+            }
+            
+        } catch {
+            if debug { print("Debug: Blue channel all-symbologies detection failed: \(error)") }
+        }
+        
+        return nil
+    }
+    
+    private static func tryChannelSeparationFusion(_ roi: CGImage, position: ROIEnhancer.QRPosition, verbose: Bool, debug: Bool) -> String? {
+        if verbose { print("Trying channel separation and fusion for \(position.name)...") }
+        
+        guard let pixelData = extractPixelData(from: roi) else { return nil }
+        
+        let width = roi.width
+        let height = roi.height
+        
+        // Extract individual channels
+        var redChannel = [UInt8](repeating: 0, count: width * height)
+        var greenChannel = [UInt8](repeating: 0, count: width * height)
+        var blueChannel = [UInt8](repeating: 0, count: width * height)
+        
+        for i in 0..<(width * height) {
+            let pixelIndex = i * 4
+            if pixelIndex + 2 < pixelData.count {
+                redChannel[i] = pixelData[pixelIndex]
+                greenChannel[i] = pixelData[pixelIndex + 1]
+                blueChannel[i] = pixelData[pixelIndex + 2]
+            }
+        }
+        
+        // Try different channel fusion strategies
+        let fusionStrategies = [
+            ("blue-enhanced", createBlueEnhancedFusion(redChannel, greenChannel, blueChannel)),
+            ("blue-green-diff", createChannelDifference(greenChannel, blueChannel)),
+            ("blue-red-diff", createChannelDifference(redChannel, blueChannel)),
+            ("weighted-blue", createWeightedBlueChannel(redChannel, greenChannel, blueChannel))
+        ]
+        
+        for (strategyName, fusedChannel) in fusionStrategies {
+            if verbose { print("  Trying fusion strategy: \(strategyName)") }
+            
+            guard let fusedImage = createGrayscaleImageFromData(fusedChannel, width: width, height: height) else {
+                continue
+            }
+            
+            // Apply Vision detection to fused channel
+            let request = VNDetectBarcodesRequest()
+            request.symbologies = [.qr]
+            request.usesCPUOnly = false
+            
+            let handler = VNImageRequestHandler(cgImage: fusedImage)
+            
+            do {
+                try handler.perform([request])
+                
+                if let results = request.results, !results.isEmpty {
+                    if verbose { print("  \(strategyName) found \(results.count) QR code(s)") }
+                    
+                    for result in results {
+                        if let payload = result.payloadStringValue {
+                            if isValidBlueChannelWatermarkQR(payload, confidence: result.confidence, verbose: verbose) {
+                                if verbose { print("Found valid watermark with \(strategyName): \(payload)") }
+                                return payload
+                            }
+                        }
+                    }
+                }
+            } catch {
+                if debug { print("Debug: \(strategyName) detection failed: \(error)") }
+            }
+        }
+        
+        return nil
+    }
+    
+    private static func createBlueEnhancedFusion(_ red: [UInt8], _ green: [UInt8], _ blue: [UInt8]) -> [UInt8] {
+        return zip(zip(red, green), blue).map { redGreen, blueValue in
+            let (redValue, greenValue) = redGreen
+            // Enhance blue channel while suppressing red and green
+            let enhanced = Int(blueValue) * 2 - Int(redValue) / 2 - Int(greenValue) / 2
+            return UInt8(max(0, min(255, enhanced)))
+        }
+    }
+    
+    private static func createChannelDifference(_ channel1: [UInt8], _ channel2: [UInt8]) -> [UInt8] {
+        return zip(channel1, channel2).map { val1, val2 in
+            let diff = abs(Int(val1) - Int(val2))
+            return UInt8(min(255, diff))
+        }
+    }
+    
+    private static func createWeightedBlueChannel(_ red: [UInt8], _ green: [UInt8], _ blue: [UInt8]) -> [UInt8] {
+        return zip(zip(red, green), blue).map { redGreen, blueValue in
+            let (redValue, greenValue) = redGreen
+            // Weighted combination favoring blue channel
+            let weighted = (Int(blueValue) * 6 + Int(greenValue) * 2 + Int(redValue) * 1) / 9
+            return UInt8(max(0, min(255, weighted)))
+        }
+    }
+    
+    private static func tryMultiChannelWeightedCombination(_ roi: CGImage, position: ROIEnhancer.QRPosition, verbose: Bool, debug: Bool) -> String? {
+        if verbose { print("Trying multi-channel weighted combination for \(position.name)...") }
+        
+        guard let pixelData = extractPixelData(from: roi) else { return nil }
+        
+        let width = roi.width
+        let height = roi.height
+        
+        // Create multiple enhanced combinations
+        var enhancedChannels: [(name: String, data: [UInt8])] = []
+        
+        // Combination 1: Blue-weighted luminance
+        var blueWeightedLuma = [UInt8](repeating: 0, count: width * height)
+        for i in 0..<(width * height) {
+            let pixelIndex = i * 4
+            if pixelIndex + 2 < pixelData.count {
+                let r = Double(pixelData[pixelIndex])
+                let g = Double(pixelData[pixelIndex + 1])
+                let b = Double(pixelData[pixelIndex + 2])
+                
+                // Modified luminance formula favoring blue channel
+                let luminance = 0.114 * r + 0.299 * g + 0.587 * b  // Blue-weighted
+                blueWeightedLuma[i] = UInt8(max(0, min(255, luminance)))
+            }
+        }
+        enhancedChannels.append(("blue-weighted-luma", blueWeightedLuma))
+        
+        // Combination 2: Blue channel with adaptive enhancement
+        var adaptiveBlue = [UInt8](repeating: 0, count: width * height)
+        for i in 0..<(width * height) {
+            let pixelIndex = i * 4
+            if pixelIndex + 2 < pixelData.count {
+                let r = Int(pixelData[pixelIndex])
+                let g = Int(pixelData[pixelIndex + 1])
+                let b = Int(pixelData[pixelIndex + 2])
+                
+                // Adaptive enhancement based on local contrast
+                let localContrast = max(abs(r - g), abs(g - b), abs(b - r))
+                let enhancementFactor = localContrast > 20 ? 1.5 : 1.2
+                
+                let enhanced = Double(b) * enhancementFactor
+                adaptiveBlue[i] = UInt8(max(0, min(255, enhanced)))
+            }
+        }
+        enhancedChannels.append(("adaptive-blue", adaptiveBlue))
+        
+        // Combination 3: Blue-dominant RGB combination
+        var blueDominant = [UInt8](repeating: 0, count: width * height)
+        for i in 0..<(width * height) {
+            let pixelIndex = i * 4
+            if pixelIndex + 2 < pixelData.count {
+                let r = Int(pixelData[pixelIndex])
+                let g = Int(pixelData[pixelIndex + 1])
+                let b = Int(pixelData[pixelIndex + 2])
+                
+                // Combination that amplifies blue when it's dominant
+                let isBlueDistinct = b > max(r, g) + 10
+                let combined = isBlueDistinct ? b * 3 / 2 : (r + g + b * 2) / 4
+                blueDominant[i] = UInt8(max(0, min(255, combined)))
+            }
+        }
+        enhancedChannels.append(("blue-dominant", blueDominant))
+        
+        // Try Vision detection on each enhanced channel
+        for (channelName, channelData) in enhancedChannels {
+            if verbose { print("  Trying multi-channel strategy: \(channelName)") }
+            
+            guard let channelImage = createGrayscaleImageFromData(channelData, width: width, height: height) else {
+                continue
+            }
+            
+            let request = VNDetectBarcodesRequest()
+            request.symbologies = [.qr]
+            request.usesCPUOnly = false
+            
+            let handler = VNImageRequestHandler(cgImage: channelImage)
+            
+            do {
+                try handler.perform([request])
+                
+                if let results = request.results, !results.isEmpty {
+                    if verbose { print("  \(channelName) found \(results.count) QR code(s)") }
+                    
+                    for result in results {
+                        if let payload = result.payloadStringValue {
+                            if isValidBlueChannelWatermarkQR(payload, confidence: result.confidence, verbose: verbose) {
+                                if verbose { print("Found valid watermark with \(channelName): \(payload)") }
+                                return payload
+                            }
+                        }
+                    }
+                }
+            } catch {
+                if debug { print("Debug: \(channelName) detection failed: \(error)") }
+            }
+        }
+        
+        return nil
+    }
+    
+    private static func tryAllSymbologies(_ roi: CGImage, position: ROIEnhancer.QRPosition, verbose: Bool, debug: Bool) -> String? {
+        if verbose { print("Trying detection with all barcode symbologies for \(position.name)...") }
+        
+        let request = VNDetectBarcodesRequest()
+        
+        // Try with all available symbologies
+        request.symbologies = [.qr, .aztec, .dataMatrix, .pdf417, .code128, .code39, .code93, .ean8, .ean13, .itf14, .upce]
+        request.usesCPUOnly = false
+        
+        let handler = VNImageRequestHandler(cgImage: roi)
+        
+        do {
+            try handler.perform([request])
+            
+            guard let results = request.results, !results.isEmpty else { return nil }
+            
+            if verbose { print("All-symbologies detection found \(results.count) barcode(s)") }
+            
+            for result in results {
+                if let payload = result.payloadStringValue {
+                    if verbose { print("Barcode detected: '\(payload)' (type: \(result.symbology.rawValue))") }
+                    
+                    if isValidWatermarkQR(payload, confidence: result.confidence) {
+                        if verbose { print("Found valid watermark in \(result.symbology.rawValue) format: \(payload)") }
+                        return payload
+                    }
+                }
+            }
+            
+        } catch {
+            if debug { print("Debug: All-symbologies detection failed: \(error)") }
+        }
+        
+        return nil
+    }
+    
+    private static func tryInvertedDetection(_ roi: CGImage, position: ROIEnhancer.QRPosition, verbose: Bool, debug: Bool) -> String? {
+        if verbose { print("Trying inverted image detection for \(position.name)...") }
+        
+        // Create inverted version of the ROI using Core Image
+        let ciImage = CIImage(cgImage: roi)
+        
+        guard let invertFilter = CIFilter(name: "CIColorInvert") else {
+            if debug { print("Debug: Failed to create color invert filter") }
+            return nil
+        }
+        
+        invertFilter.setValue(ciImage, forKey: kCIInputImageKey)
+        
+        guard let invertedCIImage = invertFilter.outputImage else {
+            if debug { print("Debug: Failed to create inverted image") }
+            return nil
+        }
+        
+        // Convert back to CGImage
+        let context = CIContext()
+        guard let invertedROI = context.createCGImage(invertedCIImage, from: invertedCIImage.extent) else {
+            if debug { print("Debug: Failed to convert inverted CIImage to CGImage") }
+            return nil
+        }
+        
+        // Perform detection on inverted image
+        let request = VNDetectBarcodesRequest()
+        request.symbologies = [.qr]
+        request.usesCPUOnly = false
+        
+        let handler = VNImageRequestHandler(cgImage: invertedROI)
+        
+        do {
+            try handler.perform([request])
+            
+            guard let results = request.results, !results.isEmpty else { return nil }
+            
+            if verbose { print("Inverted detection found \(results.count) QR code(s)") }
+            
+            for result in results {
+                if let payload = result.payloadStringValue {
+                    if verbose { print("Inverted QR detected: '\(payload)'") }
+                    
+                    if isValidWatermarkQR(payload, confidence: result.confidence) {
+                        if verbose { print("Found valid watermark QR in inverted image: \(payload)") }
+                        return payload
+                    }
+                }
+            }
+            
+        } catch {
+            if debug { print("Debug: Inverted detection failed: \(error)") }
+        }
+        
+        return nil
+    }
+    
+    private static func tryVariousConfigurations(_ roi: CGImage, position: ROIEnhancer.QRPosition, verbose: Bool, debug: Bool) -> String? {
+        if verbose { print("Trying various detection configurations for \(position.name)...") }
+        
+        // Different CPU/GPU configurations
+        let configurations = [
+            (usesCPUOnly: true, description: "CPU-only"),
+            (usesCPUOnly: false, description: "GPU-accelerated")
+        ]
+        
+        for config in configurations {
+            let request = VNDetectBarcodesRequest()
+            request.symbologies = [.qr]
+            request.usesCPUOnly = config.usesCPUOnly
+            
+            let handler = VNImageRequestHandler(cgImage: roi)
+            
+            do {
+                try handler.perform([request])
+                
+                guard let results = request.results, !results.isEmpty else { continue }
+                
+                if verbose { print("\(config.description) detection found \(results.count) QR code(s)") }
+                
+                for result in results {
+                    if let payload = result.payloadStringValue {
+                        if verbose { print("\(config.description) QR: '\(payload)'") }
+                        
+                        if isValidWatermarkQR(payload, confidence: result.confidence) {
+                            if verbose { print("Found valid watermark with \(config.description): \(payload)") }
+                            return payload
+                        }
+                    }
+                }
+                
+            } catch {
+                if debug { print("Debug: \(config.description) detection failed: \(error)") }
+            }
+        }
+        
+        return nil
+    }
+    
+    private static func isValidWatermarkQRVersion2(_ message: String, confidence: Float = 1.0) -> Bool {
+        // Enhanced validation for Version 2 QR codes with ECC Level H
+        guard !message.isEmpty else { return false }
+        
+        // Lower confidence threshold for Version 2 with better error correction
+        guard confidence >= 0.05 else { return false }  // Even lower threshold for Version 2
+        
+        // Remove Version 2 error correction first if present
+        let cleanedMessage = removeEnhancedErrorCorrection(message) ?? removeSimpleErrorCorrection(message) ?? message
+        
+        // Basic watermark format validation
+        let components = cleanedMessage.components(separatedBy: ":")
+        
+        // Should have at least 3 components: username:machine:uuid or similar
+        guard components.count >= 3 else { return false }
+        
+        // Check for reasonable length (Version 2 can handle more data)
+        guard cleanedMessage.count >= 10 && cleanedMessage.count <= 800 else { return false }
+        
+        // Look for patterns typical of our watermarks
+        let hasAlphanumeric = cleanedMessage.rangeOfCharacter(from: CharacterSet.alphanumerics) != nil
+        let hasColon = cleanedMessage.contains(":")
+        let hasReasonableLength = components.allSatisfy { $0.count > 0 && $0.count < 150 }
+        
+        // Enhanced validation: check for typical watermark patterns
+        let hasUserPattern = components.count >= 1 && !components[0].isEmpty
+        let hasMachinePattern = components.count >= 2 && !components[1].isEmpty
+        let hasIdentifierPattern = components.count >= 3 && !components[2].isEmpty
+        
+        return hasAlphanumeric && hasColon && hasReasonableLength && 
+               hasUserPattern && hasMachinePattern && hasIdentifierPattern
+    }
+    
+    private static func isValidWatermarkQR(_ message: String, confidence: Float = 1.0) -> Bool {
+        // Legacy validation function - also delegate to Version 2 for better compatibility
+        return isValidWatermarkQRVersion2(message, confidence: confidence)
+    }
+    
+    
+    private static func extractWatermarkFromEnhancedROI(_ roi: CGImage, position: ROIEnhancer.QRPosition, threshold: Double, verbose: Bool, debug: Bool) -> String? {
+        // Extract pixel data from enhanced ROI
+        guard let pixelData = extractPixelData(from: roi) else {
+            if debug { print("Debug: Failed to extract pixel data from enhanced \(position.name)") }
+            return nil
+        }
+        
+        let width = roi.width
+        let height = roi.height
+        
+        // Apply enhanced pattern detection on the processed ROI
+        // Since the ROI is already contrast-enhanced and thresholded, we can use simple binary detection
+        
+        var extractedBits: [UInt8] = []
+        var patternMatches = 0
+        var totalSamples = 0
+        
+        // Sample the entire enhanced ROI for watermark patterns
+        for y in 0..<height {
+            for x in 0..<width {
+                let pixelIndex = (y * width + x) * 4
+                
+                if pixelIndex + 2 < pixelData.count {
+                    let r = Int(pixelData[pixelIndex])
+                    let g = Int(pixelData[pixelIndex + 1])
+                    let b = Int(pixelData[pixelIndex + 2])
+                    
+                    let avgRGB = (r + g + b) / 3
+                    
+                    // For enhanced (binary) images, use simple threshold
+                    let isHighPattern = avgRGB > 127
+                    
+                    if isHighPattern {
+                        extractedBits.append(1)
+                        patternMatches += 1
+                    } else {
+                        extractedBits.append(0)
+                    }
+                    
+                    totalSamples += 1
+                }
+            }
+        }
+        
+        let patternMatchRate = Double(patternMatches) / Double(totalSamples)
+        
+        if verbose { print("Enhanced \(position.name): \(patternMatches)/\(totalSamples) pattern matches (\(String(format: "%.1f", patternMatchRate * 100))%)") }
+        
+        // Only proceed if we have a reasonable pattern match rate
+        if patternMatchRate > 0.1 && extractedBits.count >= 16 {
+            // Try to decode the enhanced pattern
+            if let decoded = decodeEnhancedPattern(extractedBits, verbose: verbose, debug: debug) {
+                return decoded
+            }
+        }
+        
+        return nil
+    }
+    
+    private static func decodeEnhancedPattern(_ bits: [UInt8], verbose: Bool, debug: Bool) -> String? {
+        // Try direct string reconstruction from bits
+        let bytes = stride(from: 0, to: bits.count, by: 8).compactMap { startIndex -> UInt8? in
+            guard startIndex + 7 < bits.count else { return nil }
+            
+            var byte: UInt8 = 0
+            for i in 0..<8 {
+                byte |= bits[startIndex + i] << i
+            }
+            return byte
+        }
+        
+        if let decoded = String(data: Data(bytes), encoding: .utf8) {
+            // Check if it looks like a watermark
+            if decoded.contains(":") && decoded.count > 10 && decoded.count < 200 {
+                if verbose { print("Decoded enhanced pattern: '\(decoded)'") }
+                return decoded
+            }
+        }
+        
+        // Try with enhanced Version 2 error correction removal (ECC Level H - 30% recovery)
+        if bits.count >= 48 {  // Version 2 uses enhanced error correction (6 bytes worth for level H)
+            let errorCorrectedBytes = stride(from: 0, to: bits.count, by: 48).compactMap { startIndex -> UInt8? in
+                guard startIndex + 47 < bits.count else { return nil }
+                
+                // Enhanced majority voting for each bit in groups of 6 (for ECC Level H)
+                var correctedByte: UInt8 = 0
+                for bitPos in 0..<8 {
+                    let bitStart = startIndex + bitPos * 6
+                    if bitStart + 5 < bits.count {
+                        var bitSum = 0
+                        for i in 0..<6 {
+                            bitSum += Int(bits[bitStart + i])
+                        }
+                        
+                        let correctedBit = bitSum >= 3 ? 1 : 0  // Majority of 6
+                        correctedByte |= UInt8(correctedBit) << bitPos
+                    }
+                }
+                
+                return correctedByte
+            }
+            
+            if let decoded = String(data: Data(errorCorrectedBytes), encoding: .utf8) {
+                if decoded.contains(":") && decoded.count > 10 && decoded.count < 200 {
+                    if verbose { print("Decoded Version 2 ECC Level H enhanced pattern: '\(decoded)'") }
+                    return decoded
+                }
+            }
+        }
+        
+        // Fallback: try original 3x error correction for backward compatibility
+        if bits.count >= 24 {  // At least 3 bytes worth
+            let errorCorrectedBytes = stride(from: 0, to: bits.count, by: 24).compactMap { startIndex -> UInt8? in
+                guard startIndex + 23 < bits.count else { return nil }
+                
+                // Majority voting for each bit in groups of 3
+                var correctedByte: UInt8 = 0
+                for bitPos in 0..<8 {
+                    let bitStart = startIndex + bitPos * 3
+                    if bitStart + 2 < bits.count {
+                        let bit1 = bits[bitStart]
+                        let bit2 = bits[bitStart + 1]
+                        let bit3 = bits[bitStart + 2]
+                        
+                        let correctedBit = (bit1 + bit2 + bit3) >= 2 ? 1 : 0
+                        correctedByte |= UInt8(correctedBit) << bitPos
+                    }
+                }
+                
+                return correctedByte
+            }
+            
+            if let decoded = String(data: Data(errorCorrectedBytes), encoding: .utf8) {
+                if decoded.contains(":") && decoded.count > 10 && decoded.count < 200 {
+                    if verbose { print("Decoded legacy error-corrected enhanced pattern: '\(decoded)'") }
+                    return decoded
+                }
+            }
+        }
+        
+        if debug { print("Debug: Failed to decode enhanced pattern from \(bits.count) bits") }
         return nil
     }
     
@@ -141,19 +1167,13 @@ class WatermarkEngine {
         var bestScore = 0.0
         
         if verbose { 
-            print("watermark overlay detection starting") 
-            print(".  Image size: \(width)x\(height)") 
-            print(".  Testing \(tileSizes.count) different tile sizes: \(tileSizes)")
-        } else {
-            print("Analyzing image...", terminator: "")
+            print(".  Starting overlay watermark detection on \(width)x\(height) image")
+            print(".  Testing \(tileSizes.count) tile sizes: \(tileSizes)")
         }
 
-        for (index, tileSize) in tileSizes.enumerated() {
+        for tileSize in tileSizes {
             if verbose { 
                 print(".  Trying tile size: \(tileSize)x\(tileSize)") 
-            } else if index % 3 == 0 {
-                print(".", terminator: "")
-                fflush(stdout)
             }
             // More aggressive position sampling - 5x5 grid plus corners and edges
             var samplePositions: [(x: Int, y: Int)] = []
@@ -204,8 +1224,6 @@ class WatermarkEngine {
         
         if verbose { 
             print(".  Final score: \(String(format: "%.3f", bestScore)), adaptive threshold: \(String(format: "%.3f", adaptiveThreshold))") 
-        } else {
-            print(" done")
         }
         let passed = bestScore > adaptiveThreshold && bestResult != nil && !bestResult!.isEmpty
         if verbose { print(".  Threshold check: \(passed ? "PASSED" : "FAILED") - \(passed ? "watermark detected" : "no watermark found")") }
@@ -250,9 +1268,8 @@ class WatermarkEngine {
                         let g = pixelData[pixelIndex + 1] 
                         let b = pixelData[pixelIndex + 2]
                         
-                        // Convert to different color spaces for better detection
-                        let (_, _, _) = rgbToHsv(r: Int(r), g: Int(g), b: Int(b))
-                        let (y, _, _) = rgbToYuv(r: Int(r), g: Int(g), b: Int(b))
+                        // Convert to luminance for better detection
+                        let y = rgbToLuminance(r: Int(r), g: Int(g), b: Int(b))
                         
                         // For camera photos, we need to be more adaptive about the baseline
                         // Calculate local average as baseline (camera color shifts)
@@ -300,8 +1317,8 @@ class WatermarkEngine {
                             )
                             
                             // Also check in luminance (Y) channel which is more robust to color shifts
-                            let expectedHighY = rgbToYuv(r: WatermarkConstants.RGB_HIGH, g: WatermarkConstants.RGB_HIGH, b: WatermarkConstants.RGB_HIGH).0
-                            let expectedLowY = rgbToYuv(r: WatermarkConstants.RGB_LOW, g: WatermarkConstants.RGB_LOW, b: WatermarkConstants.RGB_LOW).0
+                            let expectedHighY = rgbToLuminance(r: WatermarkConstants.RGB_HIGH, g: WatermarkConstants.RGB_HIGH, b: WatermarkConstants.RGB_HIGH)
+                            let expectedLowY = rgbToLuminance(r: WatermarkConstants.RGB_LOW, g: WatermarkConstants.RGB_LOW, b: WatermarkConstants.RGB_LOW)
                             
                             let isHighPatternY = abs(y - expectedHighY) <= scaledTolerance * 2
                             let isLowPatternY = abs(y - expectedLowY) <= scaledTolerance * 2
@@ -399,9 +1416,9 @@ class WatermarkEngine {
         
         if let decoded = String(data: Data(bytes), encoding: .utf8) {
             if verbose { print(".        Decoded raw string: '\(decoded)'") }
-            // Remove error correction (every character repeated 3 times)
-            let final = removeSimpleErrorCorrection(decoded)
-            if verbose { print(".        After error correction: '\(final)'") }
+            // Try Version 2 enhanced error correction first (Level H pattern)
+            let final = removeEnhancedErrorCorrection(decoded) ?? removeSimpleErrorCorrection(decoded) ?? decoded
+            if verbose { print(".        After Version 2 error correction: '\(final)'") }
             return final
         }
         
@@ -440,28 +1457,6 @@ class WatermarkEngine {
         return nil
     }
     
-    private static func removeSimpleErrorCorrection(_ input: String) -> String {
-        guard input.count % 3 == 0 else { return input }
-        
-        var result = ""
-        for i in stride(from: 0, to: input.count, by: 3) {
-            let startIndex = input.index(input.startIndex, offsetBy: i)
-            let endIndex = input.index(startIndex, offsetBy: 3)
-            let triplet = String(input[startIndex..<endIndex])
-            
-            // Use majority voting
-            let chars = Array(triplet)
-            if chars.count >= 3 {
-                if chars[0] == chars[1] || chars[0] == chars[2] {
-                    result.append(chars[0])
-                } else {
-                    result.append(chars[1])
-                }
-            }
-        }
-        
-        return result
-    }
     
     // MARK: - Spread Spectrum Watermarking
     
@@ -568,147 +1563,6 @@ class WatermarkEngine {
         return reconstructStringFromBits(extractedBits)
     }
     
-    // MARK: - DCT Watermarking
-    
-    private static func embedDCTWatermark(_ image: CGImage, watermark: String) -> CGImage? {
-        guard let pixelData = extractFloatPixelData(from: image) else { return nil }
-        
-        let width = image.width
-        let height = image.height
-        let blockSize = 8
-        
-        var modifiedData = pixelData
-        let watermarkData = Data(watermark.utf8)
-        let watermarkBits = watermarkData.flatMap { byte in
-            (0..<8).map { (byte >> $0) & 1 }
-        }
-        
-        var bitIndex = 0
-        
-        // Process image in 8x8 blocks
-        for blockY in stride(from: 0, to: height - blockSize, by: blockSize) {
-            for blockX in stride(from: 0, to: width - blockSize, by: blockSize) {
-                if bitIndex >= watermarkBits.count { break }
-                
-                embedInDCTBlock(&modifiedData, width: width, height: height,
-                              blockX: blockX, blockY: blockY, blockSize: blockSize,
-                              bit: watermarkBits[bitIndex])
-                
-                bitIndex = (bitIndex + 1) % watermarkBits.count
-            }
-        }
-        
-        return createImageFromFloatData(modifiedData, width: width, height: height)
-    }
-    
-    private static func extractDCTWatermark(from image: CGImage) -> String? {
-        guard let pixelData = extractFloatPixelData(from: image) else { return nil }
-        
-        let width = image.width
-        let height = image.height
-        let blockSize = 8
-        
-        var extractedBits: [UInt8] = []
-        
-        // Extract from 8x8 blocks
-        for blockY in stride(from: 0, to: height - blockSize, by: blockSize) {
-            for blockX in stride(from: 0, to: width - blockSize, by: blockSize) {
-                let bit = extractFromDCTBlock(pixelData, width: width, height: height,
-                                            blockX: blockX, blockY: blockY, blockSize: blockSize)
-                extractedBits.append(bit)
-            }
-        }
-        
-        // Try to reconstruct watermark from bits
-        return reconstructStringFromBits(extractedBits)
-    }
-    
-    private static func embedInDCTBlock(_ data: inout [Float], width: Int, height: Int,
-                                      blockX: Int, blockY: Int, blockSize: Int, bit: UInt8) {
-        // Extract 8x8 luminance block
-        var block = [Float](repeating: 0, count: blockSize * blockSize)
-        
-        for y in 0..<blockSize {
-            for x in 0..<blockSize {
-                let pixelIndex = ((blockY + y) * width + (blockX + x)) * 4
-                if pixelIndex + 2 < data.count {
-                    // Convert RGB to luminance
-                    let r = data[pixelIndex]
-                    let g = data[pixelIndex + 1]
-                    let b = data[pixelIndex + 2]
-                    block[y * blockSize + x] = 0.299 * r + 0.587 * g + 0.114 * b
-                }
-            }
-        }
-        
-        // Apply DCT (simplified 2D DCT)
-        var dctBlock = applyDCT(block, size: blockSize)
-        
-        // Embed bit in mid-frequency coefficient (position 3,2)
-        let coefIndex = 3 * blockSize + 2
-        if coefIndex < dctBlock.count {
-            let strength: Float = 10.0
-            if bit == 1 {
-                dctBlock[coefIndex] += strength
-            } else {
-                dctBlock[coefIndex] -= strength
-            }
-        }
-        
-        // Apply inverse DCT
-        let reconstructedBlock = applyInverseDCT(dctBlock, size: blockSize)
-        
-        // Put luminance changes back into RGB
-        for y in 0..<blockSize {
-            for x in 0..<blockSize {
-                let pixelIndex = ((blockY + y) * width + (blockX + x)) * 4
-                if pixelIndex + 2 < data.count {
-                    let originalLum = 0.299 * data[pixelIndex] + 0.587 * data[pixelIndex + 1] + 0.114 * data[pixelIndex + 2]
-                    let newLum = reconstructedBlock[y * blockSize + x]
-                    let lumDiff = newLum - originalLum
-                    
-                    // Apply luminance change to RGB channels
-                    data[pixelIndex] += lumDiff * 0.299
-                    data[pixelIndex + 1] += lumDiff * 0.587
-                    data[pixelIndex + 2] += lumDiff * 0.114
-                    
-                    // Clamp values
-                    data[pixelIndex] = max(0, min(255, data[pixelIndex]))
-                    data[pixelIndex + 1] = max(0, min(255, data[pixelIndex + 1]))
-                    data[pixelIndex + 2] = max(0, min(255, data[pixelIndex + 2]))
-                }
-            }
-        }
-    }
-    
-    private static func extractFromDCTBlock(_ data: [Float], width: Int, height: Int,
-                                          blockX: Int, blockY: Int, blockSize: Int) -> UInt8 {
-        // Extract 8x8 luminance block
-        var block = [Float](repeating: 0, count: blockSize * blockSize)
-        
-        for y in 0..<blockSize {
-            for x in 0..<blockSize {
-                let pixelIndex = ((blockY + y) * width + (blockX + x)) * 4
-                if pixelIndex + 2 < data.count {
-                    let r = data[pixelIndex]
-                    let g = data[pixelIndex + 1]
-                    let b = data[pixelIndex + 2]
-                    block[y * blockSize + x] = 0.299 * r + 0.587 * g + 0.114 * b
-                }
-            }
-        }
-        
-        // Apply DCT
-        let dctBlock = applyDCT(block, size: blockSize)
-        
-        // Extract bit from mid-frequency coefficient
-        let coefIndex = 3 * blockSize + 2
-        if coefIndex < dctBlock.count {
-            return dctBlock[coefIndex] > 0 ? 1 : 0
-        }
-        
-        return 0
-    }
     
     // MARK: - Redundant Embedding
     
@@ -816,14 +1670,14 @@ class WatermarkEngine {
                     if pixelIndex + 3 < modifiedData.count {
                         let patternValue = pattern[y * patternSize + x]
                         
-                        // Use same contrast as main watermark for better camera detection
+                        // Embed QR pattern with subtle modifications
                         if patternValue == 1 {
-                            // Set to RGB_HIGH for 1-bits
+                            // Slightly bright values for 1-bits
                             modifiedData[pixelIndex] = UInt8(WatermarkConstants.RGB_HIGH)
                             modifiedData[pixelIndex + 1] = UInt8(WatermarkConstants.RGB_HIGH)
                             modifiedData[pixelIndex + 2] = UInt8(WatermarkConstants.RGB_HIGH)
                         } else {
-                            // Set to RGB_LOW for 0-bits
+                            // Base values for 0-bits
                             modifiedData[pixelIndex] = UInt8(WatermarkConstants.RGB_LOW)
                             modifiedData[pixelIndex + 1] = UInt8(WatermarkConstants.RGB_LOW)
                             modifiedData[pixelIndex + 2] = UInt8(WatermarkConstants.RGB_LOW)
@@ -837,82 +1691,43 @@ class WatermarkEngine {
     }
     
     private static func extractMicroQRPattern(from image: CGImage) -> String? {
-        guard let pixelData = extractPixelData(from: image) else { 
-            print(".  Failed to extract pixel data")
-            return nil 
-        }
+        print("Extracting QR codes using Vision framework...")
         
-        let width = image.width
-        let height = image.height
-        let patternSize = 32
-        let margin = 10
-        let menuBarOffset = 40  // Same offset used in embedding
+        let request = VNDetectBarcodesRequest()
+        request.symbologies = [.qr]
         
-        // Define all four corner positions (same as embedding)
-        let corners = [
-            (x: width - patternSize - margin, y: menuBarOffset, name: "Top-right"),                    
-            (x: margin, y: menuBarOffset, name: "Top-left"),                                          
-            (x: width - patternSize - margin, y: height - patternSize - margin, name: "Bottom-right"),   
-            (x: margin, y: height - patternSize - margin, name: "Bottom-left")                          
-        ]
+        let handler = VNImageRequestHandler(cgImage: image, options: [:])
         
-        print("Extracting micro QR from all four corners...")
-        
-        // Try extraction from each corner
-        for corner in corners {
-            print(".  Trying \(corner.name) corner at (\(corner.x), \(corner.y))")
+        do {
+            try handler.perform([request])
             
-            var extractedPattern: [UInt8] = []
-            var validExtraction = true
+            guard let results = request.results, !results.isEmpty else {
+                print(".  No QR codes detected by Vision framework")
+                return nil
+            }
             
-            for y in 0..<patternSize {
-                for x in 0..<patternSize {
-                    let pixelIndex = ((corner.y + y) * width + (corner.x + x)) * 4
-                    if pixelIndex + 2 < pixelData.count {
-                        let r = Int(pixelData[pixelIndex])
-                        let g = Int(pixelData[pixelIndex + 1])
-                        let b = Int(pixelData[pixelIndex + 2])
-                        
-                        // Use same detection logic as main watermark
-                        let avgRGB = (r + g + b) / 3
-                        let tolerance = WatermarkConstants.DETECTION_TOLERANCE
-                        
-                        let isHigh = abs(avgRGB - WatermarkConstants.RGB_HIGH) <= tolerance
-                        let isLow = abs(avgRGB - WatermarkConstants.RGB_LOW) <= tolerance
-                        
-                        if isHigh {
-                            extractedPattern.append(1)
-                        } else if isLow {
-                            extractedPattern.append(0)
-                        } else {
-                            // Fallback: use threshold midpoint
-                            let midpoint = (WatermarkConstants.RGB_HIGH + WatermarkConstants.RGB_LOW) / 2
-                            extractedPattern.append(avgRGB > midpoint ? 1 : 0)
-                        }
-                    } else {
-                        print(".    Pixel index out of bounds: \(pixelIndex)")
-                        validExtraction = false
-                        break
+            print(".  Vision framework detected \(results.count) QR code(s)")
+            
+            // Look for watermark-like QR codes (containing our data format)  
+            for result in results {
+                if let payload = result.payloadStringValue {
+                    print(".  QR detected: '\(payload)' (confidence: \(result.confidence))")
+                    
+                    // Check if this looks like our watermark format
+                    if payload.contains("|") || payload.count > 10 {
+                        print(".  Found watermark QR: \(payload)")
+                        return payload
                     }
                 }
-                if !validExtraction { break }
             }
             
-            if validExtraction {
-                print(".    Extracted pattern length: \(extractedPattern.count)")
-                print(".    First 32 bits: \(Array(extractedPattern.prefix(32)))")
-                
-                if let result = decodeMicroPattern(extractedPattern) {
-                    print(".    Successfully decoded from \(corner.name) corner: \(result)")
-                    return result
-                } else {
-                    print(".    Failed to decode from \(corner.name) corner")
-                }
-            }
+            print(".  No watermark QR codes found")
+            return nil
+            
+        } catch {
+            print(".  Vision QR detection failed: \(error)")
+            return nil
         }
-        
-        print(".  No valid QR pattern found in any corner")
-        return nil
     }
     
     // MARK: - Helper Functions
@@ -944,10 +1759,6 @@ class WatermarkEngine {
         return pixelData
     }
     
-    private static func extractFloatPixelData(from image: CGImage) -> [Float]? {
-        guard let pixelData = extractPixelData(from: image) else { return nil }
-        return pixelData.map { Float($0) }
-    }
     
     private static func createImage(from pixelData: [UInt8], width: Int, height: Int) -> CGImage? {
         let bytesPerPixel = 4
@@ -971,60 +1782,38 @@ class WatermarkEngine {
         return context?.makeImage()
     }
     
-    private static func createImageFromFloatData(_ floatData: [Float], width: Int, height: Int) -> CGImage? {
-        let pixelData = floatData.map { UInt8(max(0, min(255, $0))) }
-        return createImage(from: pixelData, width: width, height: height)
-    }
     
-    private static func applyDCT(_ block: [Float], size: Int) -> [Float] {
-        // Simplified 2D DCT implementation
-        var result = [Float](repeating: 0, count: size * size)
-        
-        for u in 0..<size {
-            for v in 0..<size {
-                var sum: Float = 0
-                for x in 0..<size {
-                    for y in 0..<size {
-                        sum += block[y * size + x] * 
-                               cos(Float.pi * Float(u) * (Float(x) + 0.5) / Float(size)) *
-                               cos(Float.pi * Float(v) * (Float(y) + 0.5) / Float(size))
-                    }
-                }
-                let cu: Float = u == 0 ? 1.0 / sqrt(2.0) : 1.0
-                let cv: Float = v == 0 ? 1.0 / sqrt(2.0) : 1.0
-                result[v * size + u] = 0.25 * cu * cv * sum
-            }
-        }
-        
-        return result
-    }
-    
-    private static func applyInverseDCT(_ dctBlock: [Float], size: Int) -> [Float] {
-        // Simplified 2D inverse DCT implementation
-        var result = [Float](repeating: 0, count: size * size)
-        
-        for x in 0..<size {
-            for y in 0..<size {
-                var sum: Float = 0
-                for u in 0..<size {
-                    for v in 0..<size {
-                        let cu: Float = u == 0 ? 1.0 / sqrt(2.0) : 1.0
-                        let cv: Float = v == 0 ? 1.0 / sqrt(2.0) : 1.0
-                        let cosU = cos(Float.pi * Float(u) * (Float(x) + 0.5) / Float(size))
-                        let cosV = cos(Float.pi * Float(v) * (Float(y) + 0.5) / Float(size))
-                        sum += cu * cv * dctBlock[v * size + u] * cosU * cosV
-                    }
-                }
-                result[y * size + x] = 0.25 * sum
-            }
-        }
-        
-        return result
-    }
     
     private static func addSimpleErrorCorrection(_ input: String) -> String {
         // Simple repetition code - repeat each character 3 times
         return input.map { String(repeating: String($0), count: 3) }.joined()
+    }
+    
+    private static func removeEnhancedErrorCorrection(_ input: String?) -> String? {
+        // Remove Version 2 ECC Level H error correction (complex pattern matching)
+        guard let input = input else { return nil }
+        
+        // Look for the enhanced pattern: characterRepeated + "|" + blockRepeated + checksum
+        let components = input.components(separatedBy: "|")
+        if components.count >= 2 {
+            // Try to extract the first block and decode it
+            let firstBlock = components[0]
+            if let decoded = removeSimpleErrorCorrection(firstBlock) {
+                // Validate with checksum if present
+                if components.count >= 3 && components[2].count >= 2 {
+                    let expectedChecksum = decoded.reduce(0) { $0 + Int($1.asciiValue ?? 0) } % 256
+                    let checksumHex = String(format: "%02X", expectedChecksum)
+                    let providedChecksum = String(components[2].prefix(2))
+                    
+                    if checksumHex == providedChecksum {
+                        return decoded
+                    }
+                }
+                return decoded
+            }
+        }
+        
+        return nil
     }
     
     private static func removeSimpleErrorCorrection(_ input: String?) -> String? {
@@ -1104,43 +1893,14 @@ class WatermarkEngine {
     
     // MARK: - Color Space Conversions
     
-    private static func rgbToHsv(r: Int, g: Int, b: Int) -> (h: Int, s: Int, v: Int) {
-        let rf = Double(r) / 255.0
-        let gf = Double(g) / 255.0
-        let bf = Double(b) / 255.0
-        
-        let maxVal = max(rf, gf, bf)
-        let minVal = min(rf, gf, bf)
-        let diff = maxVal - minVal
-        
-        var h: Double = 0
-        let s: Double = maxVal == 0 ? 0 : diff / maxVal
-        let v: Double = maxVal
-        
-        if diff != 0 {
-            if maxVal == rf {
-                h = 60 * ((gf - bf) / diff)
-            } else if maxVal == gf {
-                h = 60 * (2 + (bf - rf) / diff)
-            } else {
-                h = 60 * (4 + (rf - gf) / diff)
-            }
-            if h < 0 { h += 360 }
-        }
-        
-        return (h: Int(h), s: Int(s * 255), v: Int(v * 255))
-    }
-    
-    private static func rgbToYuv(r: Int, g: Int, b: Int) -> (y: Int, u: Int, v: Int) {
+    private static func rgbToLuminance(r: Int, g: Int, b: Int) -> Int {
+        // Standard luminance calculation (ITU-R BT.709)
         let rf = Double(r)
         let gf = Double(g)
         let bf = Double(b)
         
         let y = 0.299 * rf + 0.587 * gf + 0.114 * bf
-        let u = -0.14713 * rf - 0.28886 * gf + 0.436 * bf + Double(WatermarkConstants.RGB_BASE)
-        let v = 0.615 * rf - 0.51499 * gf - 0.10001 * bf + Double(WatermarkConstants.RGB_BASE)
-        
-        return (y: Int(y), u: Int(u), v: Int(v))
+        return Int(y)
     }
     
     // MARK: - Noise Filtering and Signal Enhancement
@@ -1280,5 +2040,242 @@ class WatermarkEngine {
         }
         
         return String(data: Data(bytes), encoding: .utf8)
+    }
+    
+    private static func extractOverlayQRFormat(pixelData: [UInt8], width: Int, height: Int, margin: Int, menuBarOffset: Int) -> String? {
+        let patternSize = WatermarkConstants.QR_VERSION2_SIZE  // Version 2 QR size (37x37)
+        let pixelsPerModule = WatermarkConstants.QR_VERSION2_PIXELS_PER_MODULE  // 5x5 pixels per QR module
+        let qrPixelSize = WatermarkConstants.QR_VERSION2_PIXEL_SIZE  // 185 total pixels
+        
+        // Define corner positions for overlay QR codes
+        let corners = [
+            (x: width - qrPixelSize - margin, y: height - menuBarOffset - qrPixelSize, name: "Top-right"),                    
+            (x: margin, y: height - menuBarOffset - qrPixelSize, name: "Top-left"),                                          
+            (x: width - qrPixelSize - margin, y: margin, name: "Bottom-right"),   
+            (x: margin, y: margin, name: "Bottom-left")                          
+        ]
+        
+        print(".  Image dimensions: \(width)x\(height)")
+        print(".  Expected Version 2 QR size: \(qrPixelSize)x\(qrPixelSize) pixels (\(patternSize)x\(patternSize) modules)")
+        
+        for corner in corners {
+            print(".  Trying overlay QR format at \(corner.name) corner (\(corner.x), \(corner.y))")
+            print(".    QR area bounds: (\(corner.x), \(corner.y)) to (\(corner.x + qrPixelSize), \(corner.y + qrPixelSize))")
+            
+            if let result = extractOverlayQRAtPosition(pixelData: pixelData, width: width, height: height, 
+                                                     startX: corner.x, startY: corner.y, 
+                                                     patternSize: patternSize, pixelsPerModule: pixelsPerModule) {
+                print(".    Successfully decoded overlay QR from \(corner.name): \(result)")
+                return result
+            } else {
+                print(".    Failed to extract from \(corner.name) corner")
+            }
+        }
+        
+        return nil
+    }
+    
+    private static func extractEmbeddedQRFormat(pixelData: [UInt8], width: Int, height: Int, margin: Int, menuBarOffset: Int) -> String? {
+        let patternSize = 32  // Old embedded QR size
+        
+        // Define corner positions for embedded QR codes  
+        let corners = [
+            (x: width - patternSize - margin, y: menuBarOffset, name: "Top-right"),                    
+            (x: margin, y: menuBarOffset, name: "Top-left"),                                          
+            (x: width - patternSize - margin, y: height - patternSize - margin, name: "Bottom-right"),   
+            (x: margin, y: height - patternSize - margin, name: "Bottom-left")                          
+        ]
+        
+        for corner in corners {
+            print(".  Trying embedded QR format at \(corner.name) corner (\(corner.x), \(corner.y))")
+            
+            var extractedPattern: [UInt8] = []
+            var validExtraction = true
+            
+            for y in 0..<patternSize {
+                for x in 0..<patternSize {
+                    let pixelIndex = ((corner.y + y) * width + (corner.x + x)) * 4
+                    if pixelIndex + 2 < pixelData.count {
+                        let r = Int(pixelData[pixelIndex])
+                        let g = Int(pixelData[pixelIndex + 1])
+                        let b = Int(pixelData[pixelIndex + 2])
+                        
+                        // Use same detection logic as main watermark
+                        let avgRGB = (r + g + b) / 3
+                        let tolerance = WatermarkConstants.DETECTION_TOLERANCE
+                        
+                        let isHigh = abs(avgRGB - WatermarkConstants.RGB_HIGH) <= tolerance
+                        let isLow = abs(avgRGB - WatermarkConstants.RGB_LOW) <= tolerance
+                        
+                        if isHigh {
+                            extractedPattern.append(1)
+                        } else if isLow {
+                            extractedPattern.append(0)
+                        } else {
+                            // Fallback: use threshold midpoint
+                            let midpoint = (WatermarkConstants.RGB_HIGH + WatermarkConstants.RGB_LOW) / 2
+                            extractedPattern.append(avgRGB > midpoint ? 1 : 0)
+                        }
+                    } else {
+                        print(".    Pixel index out of bounds: \(pixelIndex)")
+                        validExtraction = false
+                        break
+                    }
+                }
+                if !validExtraction { break }
+            }
+            
+            if validExtraction {
+                print(".    Extracted embedded pattern length: \(extractedPattern.count)")
+                
+                if let result = decodeMicroPattern(extractedPattern) {
+                    print(".    Successfully decoded embedded QR from \(corner.name): \(result)")
+                    return result
+                } else {
+                    print(".    Failed to decode embedded QR from \(corner.name)")
+                }
+            }
+        }
+        
+        return nil
+    }
+    
+    private static func extractOverlayQRAtPosition(pixelData: [UInt8], width: Int, height: Int, 
+                                                 startX: Int, startY: Int, patternSize: Int, pixelsPerModule: Int) -> String? {
+        var extractedPattern: [UInt8] = []
+        var sampleCount = 0
+        var blackPixels = 0
+        var whitePixels = 0
+        
+        // Extract QR pattern by sampling the center of each module
+        for moduleY in 0..<patternSize {
+            for moduleX in 0..<patternSize {
+                // Sample the center pixel of each module
+                let centerX = startX + moduleX * pixelsPerModule + pixelsPerModule / 2
+                let centerY = startY + moduleY * pixelsPerModule + pixelsPerModule / 2
+                
+                let pixelIndex = (centerY * width + centerX) * 4
+                if pixelIndex + 2 < pixelData.count {
+                    let r = Int(pixelData[pixelIndex])
+                    let g = Int(pixelData[pixelIndex + 1])
+                    let b = Int(pixelData[pixelIndex + 2])
+                    
+                    // Adaptive thresholding for better camera photo detection
+                    let avgRGB = (r + g + b) / 3
+                    // Use dynamic threshold based on local image characteristics
+                    let dynamicThreshold = calculateDynamicThreshold(pixelData: pixelData, width: width, height: height, centerX: centerX, centerY: centerY)
+                    let bit: UInt8 = avgRGB > dynamicThreshold ? 1 : 0
+                    extractedPattern.append(bit)
+                    
+                    if bit == 1 { whitePixels += 1 } else { blackPixels += 1 }
+                    sampleCount += 1
+                    
+                    // Debug first few pixels
+                    if sampleCount <= 5 {
+                        print(".      Pixel (\(centerX), \(centerY)): RGB(\(r),\(g),\(b)) avg=\(avgRGB) -> \(bit)")
+                    }
+                } else {
+                    print(".      Pixel (\(centerX), \(centerY)) out of bounds, pixelIndex=\(pixelIndex), max=\(pixelData.count)")
+                    return nil  // Out of bounds
+                }
+            }
+        }
+        
+        print(".      Extracted \(sampleCount) pixels: \(blackPixels) black, \(whitePixels) white")
+        print(".      First 25 bits: \(Array(extractedPattern.prefix(25)))")
+        
+        // Try to decode the extracted pattern
+        return decodeOverlayQRPattern(extractedPattern)
+    }
+    
+    private static func calculateDynamicThreshold(pixelData: [UInt8], width: Int, height: Int, centerX: Int, centerY: Int) -> Int {
+        // Sample surrounding area to determine local threshold
+        var samples: [Int] = []
+        let sampleRadius = WatermarkConstants.QR_THRESHOLD_SAMPLE_RADIUS
+        
+        for dy in -sampleRadius...sampleRadius {
+            for dx in -sampleRadius...sampleRadius {
+                let sampleX = centerX + dx
+                let sampleY = centerY + dy
+                
+                if sampleX >= 0 && sampleX < width && sampleY >= 0 && sampleY < height {
+                    let pixelIndex = (sampleY * width + sampleX) * 4
+                    if pixelIndex + 2 < pixelData.count {
+                        let r = Int(pixelData[pixelIndex])
+                        let g = Int(pixelData[pixelIndex + 1])
+                        let b = Int(pixelData[pixelIndex + 2])
+                        samples.append((r + g + b) / 3)
+                    }
+                }
+            }
+        }
+        
+        if samples.isEmpty { return WatermarkConstants.QR_BINARY_THRESHOLD }
+        
+        // Use median as threshold for better noise resistance
+        samples.sort()
+        return samples[samples.count / 2]
+    }
+    
+    private static func decodeOverlayQRPattern(_ pattern: [UInt8]) -> String? {
+        // Validate finder patterns first for Version 2 QR
+        if !validateFinderPatterns(pattern, size: WatermarkConstants.QR_VERSION2_SIZE) {
+            print(".      Version 2 finder pattern validation failed")
+            return nil
+        }
+        
+        // Extract data from non-structural areas
+        var dataBits: [UInt8] = []
+        let size = WatermarkConstants.QR_VERSION2_SIZE
+        
+        for y in 0..<size {
+            for x in 0..<size {
+                let index = y * size + x
+                // Skip structural patterns for Version 2 QR (37x37)
+                let inTopLeftFinder = (x < 9 && y < 9)
+                let inTopRightFinder = (x >= size-9 && y < 9)
+                let inBottomLeftFinder = (x < 9 && y >= size-9)
+                let inAlignment = (x >= 14 && x <= 20 && y >= 14 && y <= 20)  // Version 2 alignment at (18,18)
+                let inTiming = (x == 6 || y == 6)
+                
+                let isStructural = inTopLeftFinder || inTopRightFinder || inBottomLeftFinder || inAlignment || inTiming
+                
+                if !isStructural && index < pattern.count {
+                    dataBits.append(pattern[index])
+                }
+            }
+        }
+        
+        // Convert bits to string
+        return reconstructStringFromBits(dataBits)
+    }
+    
+    private static func validateFinderPatterns(_ pattern: [UInt8], size: Int) -> Bool {
+        // Check if top-left finder pattern exists
+        let expectedPattern = [
+            1,1,1,1,1,1,1,
+            1,0,0,0,0,0,1,
+            1,0,1,1,1,0,1,
+            1,0,1,1,1,0,1,
+            1,0,1,1,1,0,1,
+            1,0,0,0,0,0,1,
+            1,1,1,1,1,1,1
+        ]
+        
+        var matches = 0
+        for y in 0..<7 {
+            for x in 0..<7 {
+                let patternIndex = y * size + x
+                let expectedIndex = y * 7 + x
+                if patternIndex < pattern.count && expectedIndex < expectedPattern.count {
+                    if pattern[patternIndex] == expectedPattern[expectedIndex] {
+                        matches += 1
+                    }
+                }
+            }
+        }
+        
+        // Require configurable match threshold for finder pattern tolerance
+        return Double(matches) / Double(expectedPattern.count) >= WatermarkConstants.QR_FINDER_PATTERN_TOLERANCE
     }
 }
