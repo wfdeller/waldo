@@ -4,6 +4,7 @@ import Foundation
 class OverlayWindowManager: NSObject {
     private var overlayWindows: [NSScreen: NSWindow] = [:]
     private var watermarkViews: [NSScreen: WatermarkOverlayView] = [:]
+    private var beagleWindows: [NSWindow] = []
     private var refreshTimer: Timer?
     private var isActive = false
     private var currentOpacity: Int = WatermarkConstants.ALPHA_OPACITY
@@ -308,5 +309,16 @@ class OverlayWindowManager: NSObject {
         }
         
         return false
+    }
+    
+    func setBeagleWindows(_ windows: [NSWindow]) {
+        beagleWindows = windows
+    }
+    
+    func stopBeagleOverlay() {
+        for window in beagleWindows {
+            window.orderOut(nil)
+        }
+        beagleWindows.removeAll()
     }
 }

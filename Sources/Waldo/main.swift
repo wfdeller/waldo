@@ -101,7 +101,7 @@ struct OverlayCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "overlay",
         abstract: "Manage transparent desktop overlay watermarking",
-        subcommands: [StartOverlayCommand.self, StopOverlayCommand.self, StatusOverlayCommand.self, SaveOverlayCommand.self, SaveDesktopCommand.self, DebugScreenCommand.self]
+        subcommands: [StartOverlayCommand.self, StopOverlayCommand.self, StatusOverlayCommand.self, SaveOverlayCommand.self, SaveDesktopCommand.self, DebugScreenCommand.self, OverlaySampleCommand.self]
     )
 }
 
@@ -1223,5 +1223,116 @@ struct SaveDesktopCommand: ParsableCommand {
         
         logger.debug("No overlay processes found")
         return false
+    }
+}
+
+struct OverlaySampleCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "overlay_sample",
+        abstract: "Display a tiled wireframe beagle dog overlay for testing and identification"
+    )
+    
+    @Option(name: .shortAndLong, help: "Tile size in pixels (default: 150)")
+    var tileSize: Int = 150
+    
+    @Option(name: .shortAndLong, help: "Line width for wireframe (default: 3)")
+    var lineWidth: Int = 3
+    
+    @Option(name: .shortAndLong, help: "Opacity percentage (0.1-100, default: 5)")
+    var opacity: Double = 5.0
+    
+    @Flag(name: .shortAndLong, help: "Show verbose information")
+    var verbose: Bool = false
+    
+    @Flag(name: .shortAndLong, help: "Show debug information")
+    var debug: Bool = false
+    
+    func run() throws {
+        let logger = Logger(verbose: verbose, debug: debug)
+        
+        print("Waldo v\(Version.current)")
+        print("Starting wireframe beagle overlay sample...")
+        
+        logger.debug("Creating beagle overlay with tile size: \(tileSize), line width: \(lineWidth), opacity: \(opacity)%")
+        
+        // Validate parameters
+        guard tileSize >= 50 && tileSize <= 500 else {
+            print("Error: Tile size must be between 50 and 500 pixels (provided: \(tileSize))")
+            throw ExitCode.failure
+        }
+        
+        guard lineWidth >= 1 && lineWidth <= 10 else {
+            print("Error: Line width must be between 1 and 10 pixels (provided: \(lineWidth))")
+            throw ExitCode.failure
+        }
+        
+        guard opacity >= 0.1 && opacity <= 100.0 else {
+            print("Error: Opacity must be between 0.1 and 100 percent (provided: \(opacity))")
+            throw ExitCode.failure
+        }
+        
+        // Check if overlay is already running
+        let manager = OverlayWindowManager.shared
+        let status = manager.getStatus()
+        
+        if status["active"] as? Bool == true {
+            print("Error: Overlay is already running. Use 'waldo overlay stop' first.")
+            throw ExitCode.failure
+        }
+        
+        logger.debug("Starting beagle overlay...")
+        
+        // Get current user name
+        let userName = NSUserName()
+        
+        do {
+            try startBeagleOverlay(tileSize: tileSize, lineWidth: lineWidth, opacity: opacity, userName: userName, logger: logger)
+            print("✓ Wireframe beagle overlay started successfully")
+            print("✓ User: \(userName)")
+            print("✓ Opacity: \(opacity)% visibility")
+            print("Press Ctrl+C to stop the overlay")
+            
+            // Keep the process running
+            RunLoop.main.run()
+        } catch {
+            logger.debug("Failed to start beagle overlay: \(error)")
+            print("Error: Failed to start overlay - \(error.localizedDescription)")
+            throw ExitCode.failure
+        }
+    }
+    
+    private func startBeagleOverlay(tileSize: Int, lineWidth: Int, opacity: Double, userName: String, logger: Logger) throws {
+        let screens = NSScreen.screens
+        var overlayWindows: [NSWindow] = []
+        
+        for screen in screens {
+            logger.debug("Creating beagle overlay for screen: \(screen.frame)")
+            
+            let window = NSWindow(
+                contentRect: screen.frame,
+                styleMask: [.borderless],
+                backing: .buffered,
+                defer: false,
+                screen: screen
+            )
+            
+            window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.overlayWindow)))
+            window.isOpaque = false
+            window.backgroundColor = NSColor.clear
+            window.ignoresMouseEvents = true
+            window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
+            
+            // Create the beagle view
+            let beagleView = BeagleOverlayView(frame: window.contentView!.bounds, tileSize: tileSize, lineWidth: lineWidth, opacity: opacity, userName: userName)
+            window.contentView = beagleView
+            
+            window.makeKeyAndOrderFront(nil)
+            overlayWindows.append(window)
+        }
+        
+        logger.debug("Created \(overlayWindows.count) beagle overlay windows")
+        
+        // Store windows globally to prevent deallocation
+        OverlayWindowManager.shared.setBeagleWindows(overlayWindows)
     }
 }

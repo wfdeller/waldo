@@ -1,5 +1,5 @@
 public struct Version {
-    public static let current = "2.2.0"
+    public static let current = "2.3.0"
 }
 
 ///
@@ -10,4 +10,5 @@ public struct Version {
 /// 2.0.8 - updated extraction logic for Version 2 QR codes (37x37) with enhanced error correction
 /// 2.1.0 - a lot of QR updates 
 /// 2.2.0 - enhancements to attempt to recognize desktop screenshots
+/// 2.3.0 - added overlay_sample option
 /// 
