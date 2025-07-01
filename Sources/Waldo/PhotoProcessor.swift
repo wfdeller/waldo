@@ -5,25 +5,131 @@ import ImageIO
 
 class PhotoProcessor {
     
-    static func loadImage(from url: URL) -> CGImage? {
-        guard let imageSource = CGImageSourceCreateWithURL(url as CFURL, nil),
-              let image = CGImageSourceCreateImageAtIndex(imageSource, 0, nil) else {
+    static func loadImage(from url: URL, logger: Logger = Logger()) -> CGImage? {
+        let startTime = CFAbsoluteTimeGetCurrent()
+        
+        logger.debug("Attempting to load image from: \(url.path)")
+        
+        // Check file existence and permissions
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: url.path) else {
+            logger.debug("File does not exist: \(url.path)")
             return nil
         }
+        
+        // Check file size
+        do {
+            let attributes = try fileManager.attributesOfItem(atPath: url.path)
+            if let fileSize = attributes[.size] as? Int64 {
+                logger.debug("File size: \(fileSize) bytes")
+                if fileSize == 0 {
+                    logger.debug("File is empty")
+                    return nil
+                }
+                if fileSize > 100_000_000 { // 100MB limit
+                    logger.debug("File too large: \(fileSize) bytes (limit: 100MB)")
+                }
+            }
+        } catch {
+            logger.debug("Failed to read file attributes: \(error.localizedDescription)")
+        }
+        
+        // Validate file type
+        guard let fileType = UTType(filenameExtension: url.pathExtension) else {
+            logger.debug("Unknown file extension: \(url.pathExtension)")
+            return nil
+        }
+        
+        guard fileType.conforms(to: .image) else {
+            logger.debug("File is not an image type: \(fileType.identifier)")
+            return nil
+        }
+        
+        logger.debug("File type validated: \(fileType.identifier)")
+        
+        // Create image source
+        guard let imageSource = CGImageSourceCreateWithURL(url as CFURL, nil) else {
+            logger.debug("Failed to create CGImageSource from URL")
+            return nil
+        }
+        
+        // Get image properties
+        if let properties = CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [String: Any] {
+            logger.debug("Image properties: \(properties)")
+            
+            if let pixelWidth = properties[kCGImagePropertyPixelWidth as String] as? Int,
+               let pixelHeight = properties[kCGImagePropertyPixelHeight as String] as? Int {
+                logger.debug("Image dimensions: \(pixelWidth)x\(pixelHeight)")
+            }
+            
+            if let colorModel = properties[kCGImagePropertyColorModel as String] as? String {
+                logger.debug("Color model: \(colorModel)")
+            }
+            
+            if let hasAlpha = properties[kCGImagePropertyHasAlpha as String] as? Bool {
+                logger.debug("Has alpha channel: \(hasAlpha)")
+            }
+        }
+        
+        // Create the image
+        guard let image = CGImageSourceCreateImageAtIndex(imageSource, 0, nil) else {
+            logger.debug("Failed to create CGImage from source")
+            return nil
+        }
+        
+        let loadTime = CFAbsoluteTimeGetCurrent() - startTime
+        logger.timing("Image loading", duration: loadTime)
+        logger.debug("Successfully loaded image: \(image.width)x\(image.height)")
+        
         return image
     }
     
-    static func loadImage(from data: Data) -> CGImage? {
-        guard let imageSource = CGImageSourceCreateWithData(data as CFData, nil),
-              let image = CGImageSourceCreateImageAtIndex(imageSource, 0, nil) else {
+    static func loadImage(from data: Data, logger: Logger = Logger()) -> CGImage? {
+        let startTime = CFAbsoluteTimeGetCurrent()
+        
+        logger.debug("Attempting to load image from data (\(data.count) bytes)")
+        
+        guard !data.isEmpty else {
+            logger.debug("Data is empty")
             return nil
         }
+        
+        if data.count > 100_000_000 { // 100MB limit
+            logger.debug("Data too large: \(data.count) bytes (limit: 100MB)")
+        }
+        
+        guard let imageSource = CGImageSourceCreateWithData(data as CFData, nil) else {
+            logger.debug("Failed to create CGImageSource from data")
+            return nil
+        }
+        
+        // Get image properties
+        if let properties = CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [String: Any] {
+            logger.debug("Image properties from data: \(properties)")
+            
+            if let pixelWidth = properties[kCGImagePropertyPixelWidth as String] as? Int,
+               let pixelHeight = properties[kCGImagePropertyPixelHeight as String] as? Int {
+                logger.debug("Image dimensions from data: \(pixelWidth)x\(pixelHeight)")
+            }
+        }
+        
+        guard let image = CGImageSourceCreateImageAtIndex(imageSource, 0, nil) else {
+            logger.debug("Failed to create CGImage from data source")
+            return nil
+        }
+        
+        let loadTime = CFAbsoluteTimeGetCurrent() - startTime
+        logger.timing("Image loading from data", duration: loadTime)
+        logger.debug("Successfully loaded image from data: \(image.width)x\(image.height)")
+        
         return image
     }
     
     static func extractWatermarkFromPhoto(at url: URL, threshold: Double = WatermarkConstants.PHOTO_CONFIDENCE_THRESHOLD, verbose: Bool = false, debug: Bool = false, enableScreenDetection: Bool = true) -> (userID: String, watermark: String, timestamp: TimeInterval)? {
-        guard let image = loadImage(from: url) else {
-            print("Failed to load image from: \(url)")
+        let logger = Logger(verbose: verbose, debug: debug)
+        
+        guard let image = loadImage(from: url, logger: logger) else {
+            logger.error("Failed to load image from: \(url)")
             return nil
         }
         
@@ -77,8 +183,10 @@ class PhotoProcessor {
     }
     
     static func extractWatermarkFromPhotoData(_ data: Data, threshold: Double = WatermarkConstants.PHOTO_CONFIDENCE_THRESHOLD, verbose: Bool = false, debug: Bool = false, enableScreenDetection: Bool = true) -> (userID: String, watermark: String, timestamp: TimeInterval)? {
-        guard let image = loadImage(from: data) else {
-            print("Failed to load image from data")
+        let logger = Logger(verbose: verbose, debug: debug)
+        
+        guard let image = loadImage(from: data, logger: logger) else {
+            logger.error("Failed to load image from data")
             return nil
         }
         

@@ -20,26 +20,60 @@ class OverlayWindowManager: NSObject {
         NotificationCenter.default.removeObserver(self)
     }
     
-    func startOverlays(opacity: Int = WatermarkConstants.ALPHA_OPACITY) {
-        guard !isActive else { return }
+    func startOverlays(opacity: Int = WatermarkConstants.ALPHA_OPACITY, logger: Logger = Logger()) {
+        let startTime = CFAbsoluteTimeGetCurrent()
+        
+        guard !isActive else { 
+            logger.debug("Overlay already active, skipping start")
+            return 
+        }
+        
+        logger.debug("Starting overlay system with opacity \(opacity)/255")
+        logger.debug("Available screens: \(NSScreen.screens.count)")
+        
+        for (index, screen) in NSScreen.screens.enumerated() {
+            let frame = screen.frame
+            let scale = screen.backingScaleFactor
+            logger.debug("Screen \(index): \(Int(frame.width))x\(Int(frame.height)) @\(scale)x scale")
+        }
         
         currentOpacity = opacity
         isActive = true
-        createOverlayWindows(opacity: opacity)
+        createOverlayWindows(opacity: opacity, logger: logger)
         startRefreshTimer()
+        
+        let startupTime = CFAbsoluteTimeGetCurrent() - startTime
+        logger.timing("Overlay startup", duration: startupTime)
         
         print("✓ Desktop overlay watermarking started on \(NSScreen.screens.count) display(s)")
         print("✓ Overlay opacity: \(opacity)/255 (≈\(Int(round(Double(opacity) / 255.0 * 100)))%)")
+        
+        logger.debug("Overlay system started successfully")
+        logger.debug("Active windows: \(overlayWindows.count)")
+        logger.debug("Active watermark views: \(watermarkViews.count)")
     }
     
-    func stopOverlays() {
-        guard isActive else { return }
+    func stopOverlays(logger: Logger = Logger()) {
+        let stopTime = CFAbsoluteTimeGetCurrent()
+        
+        guard isActive else { 
+            logger.debug("Overlay not active, skipping stop")
+            return 
+        }
+        
+        logger.debug("Stopping overlay system")
+        logger.debug("Windows to remove: \(overlayWindows.count)")
+        logger.debug("Views to clean up: \(watermarkViews.count)")
         
         isActive = false
         stopRefreshTimer()
         removeAllOverlayWindows()
         
+        let shutdownTime = CFAbsoluteTimeGetCurrent() - stopTime
+        logger.timing("Overlay shutdown", duration: shutdownTime)
+        
         print("✓ Desktop overlay watermarking stopped")
+        logger.debug("Overlay system stopped successfully")
     }
     
     func refreshWatermarks() {
@@ -82,12 +116,18 @@ class OverlayWindowManager: NSObject {
         return status
     }
     
-    private func createOverlayWindows(opacity: Int = WatermarkConstants.ALPHA_OPACITY) {
+    private func createOverlayWindows(opacity: Int = WatermarkConstants.ALPHA_OPACITY, logger: Logger = Logger()) {
+        logger.debug("Creating overlay windows for \(NSScreen.screens.count) screens")
         removeAllOverlayWindows()
         
-        for screen in NSScreen.screens {
+        for (index, screen) in NSScreen.screens.enumerated() {
+            let windowStartTime = CFAbsoluteTimeGetCurrent()
             createOverlayWindow(for: screen, opacity: opacity)
+            let windowTime = CFAbsoluteTimeGetCurrent() - windowStartTime
+            logger.debug("Created window for screen \(index) in \(String(format: "%.3f", windowTime))s")
         }
+        
+        logger.debug("Finished creating \(overlayWindows.count) overlay windows")
     }
     
     private func createOverlayWindow(for screen: NSScreen, opacity: Int = WatermarkConstants.ALPHA_OPACITY) {

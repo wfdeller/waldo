@@ -9,50 +9,87 @@ class ScreenDetector {
     // MARK: - Public Interface
     
     static func detectAndCorrectScreen(from image: CGImage, verbose: Bool = false) -> CGImage? {
-        if verbose { print("Starting screen detection and perspective correction...") }
+        let logger = Logger(verbose: verbose, debug: verbose) // Use verbose for debug in screen detection
+        let startTime = CFAbsoluteTimeGetCurrent()
+        
+        logger.verbose("Starting screen detection and perspective correction...")
+        logger.debug("Input image: \(image.width)x\(image.height), color space: \(String(describing: image.colorSpace?.name))")
         
         // First try rectangle detection using Vision framework
-        if let correctedImage = detectScreenWithVision(image: image, verbose: verbose) {
-            if verbose { print("Screen detected and corrected using Vision framework") }
+        let visionStartTime = CFAbsoluteTimeGetCurrent()
+        if let correctedImage = detectScreenWithVision(image: image, verbose: verbose, logger: logger) {
+            let visionTime = CFAbsoluteTimeGetCurrent() - visionStartTime
+            logger.timing("Vision framework detection", duration: visionTime)
+            logger.verbose("Screen detected and corrected using Vision framework")
+            
+            let totalTime = CFAbsoluteTimeGetCurrent() - startTime
+            logger.timing("Total screen detection", duration: totalTime)
             return correctedImage
         }
         
-        if verbose { print("Vision detection failed, trying Canny edge detection...") }
+        let visionTime = CFAbsoluteTimeGetCurrent() - visionStartTime
+        logger.timing("Vision framework detection (failed)", duration: visionTime)
+        logger.verbose("Vision detection failed, trying Canny edge detection...")
         
         // Fallback to custom edge detection
+        let edgeStartTime = CFAbsoluteTimeGetCurrent()
         if let correctedImage = detectScreenWithEdgeDetection(image: image, verbose: verbose) {
-            if verbose { print("Screen detected and corrected using edge detection") }
+            let edgeTime = CFAbsoluteTimeGetCurrent() - edgeStartTime
+            logger.timing("Edge detection", duration: edgeTime)
+            logger.verbose("Screen detected and corrected using edge detection")
+            
+            let totalTime = CFAbsoluteTimeGetCurrent() - startTime
+            logger.timing("Total screen detection", duration: totalTime)
             return correctedImage
         }
         
-        if verbose { print("Edge detection failed, trying Hough line detection...") }
+        let edgeTime = CFAbsoluteTimeGetCurrent() - edgeStartTime
+        logger.timing("Edge detection (failed)", duration: edgeTime)
+        logger.verbose("Edge detection failed, trying Hough line detection...")
         
         // Final fallback to Hough line detection
+        let houghStartTime = CFAbsoluteTimeGetCurrent()
         if let correctedImage = detectScreenWithHoughLines(image: image, verbose: verbose) {
-            if verbose { print("Screen detected and corrected using Hough lines") }
+            let houghTime = CFAbsoluteTimeGetCurrent() - houghStartTime
+            logger.timing("Hough line detection", duration: houghTime)
+            logger.verbose("Screen detected and corrected using Hough lines")
+            
+            let totalTime = CFAbsoluteTimeGetCurrent() - startTime
+            logger.timing("Total screen detection", duration: totalTime)
             return correctedImage
         }
         
-        if verbose { print("All screen detection methods failed") }
+        let houghTime = CFAbsoluteTimeGetCurrent() - houghStartTime
+        let totalTime = CFAbsoluteTimeGetCurrent() - startTime
+        logger.timing("Hough line detection (failed)", duration: houghTime)
+        logger.timing("Total screen detection (all methods failed)", duration: totalTime)
+        
+        logger.verbose("All screen detection methods failed")
+        logger.debug("Detection failure analysis:")
+        logger.debug("- Vision framework: failed after \(String(format: "%.3f", visionTime))s")
+        logger.debug("- Edge detection: failed after \(String(format: "%.3f", edgeTime))s") 
+        logger.debug("- Hough lines: failed after \(String(format: "%.3f", houghTime))s")
+        logger.debug("- Total processing time: \(String(format: "%.3f", totalTime))s")
+        
         return nil
     }
     
     // MARK: - Vision Framework Rectangle Detection
     
-    private static func detectScreenWithVision(image: CGImage, verbose: Bool) -> CGImage? {
+    private static func detectScreenWithVision(image: CGImage, verbose: Bool, logger: Logger) -> CGImage? {
         // Try optimized display detection first
-        if let displayResult = detectDisplayRectangleOptimized(image: image, verbose: verbose) {
+        if let displayResult = detectDisplayRectangleOptimized(image: image, verbose: verbose, logger: logger) {
             return displayResult
         }
         
-        if verbose { print("Optimized display detection failed, trying general rectangle detection...") }
+        logger.verbose("Optimized display detection failed, trying general rectangle detection...")
         
         // Fallback to general rectangle detection
         return detectScreenWithGeneralVision(image: image, verbose: verbose)
     }
     
-    private static func detectDisplayRectangleOptimized(image: CGImage, verbose: Bool) -> CGImage? {
-        if verbose { print("Starting optimized display rectangle detection...") }
+    private static func detectDisplayRectangleOptimized(image: CGImage, verbose: Bool, logger: Logger) -> CGImage? {
+        logger.verbose("Starting optimized display rectangle detection...")
         
         let rectRequest = VNDetectRectanglesRequest()
         
@@ -64,32 +101,40 @@ class ScreenDetector {
         rectRequest.minimumConfidence = 0.6    // Balanced confidence for reliable detection
         rectRequest.quadratureTolerance = 15.0 // Allow some perspective distortion (degrees)
         
+        logger.debug("Vision parameters: aspect ratio \(rectRequest.minimumAspectRatio)-\(rectRequest.maximumAspectRatio), min size \(rectRequest.minimumSize), confidence \(rectRequest.minimumConfidence)")
+        
         let handler = VNImageRequestHandler(cgImage: image)
         
         do {
             try handler.perform([rectRequest])
             
             guard let results = rectRequest.results, !results.isEmpty else {
-                if verbose { print("No display rectangle detected by optimized Vision detection") }
+                logger.verbose("No display rectangle detected by optimized Vision detection")
+                logger.debug("Vision request completed with 0 results")
                 return nil
+            }
+            
+            logger.debug("Vision detected \(results.count) rectangle candidate(s)")
+            for (index, result) in results.enumerated() {
+                let aspectRatio = calculateDisplayAspectRatio(result, imageSize: CGSize(width: image.width, height: image.height))
+                logger.debug("Candidate \(index + 1): confidence \(String(format: "%.3f", result.confidence)), aspect ratio \(String(format: "%.2f", aspectRatio))")
             }
             
             // Find the best display candidate from multiple results
             let bestQuad = findBestDisplayRectangle(results, imageSize: CGSize(width: image.width, height: image.height), verbose: verbose)
             
             guard let quad = bestQuad else {
-                if verbose { print("No suitable display rectangle found in optimized detection") }
+                logger.verbose("No suitable display rectangle found in optimized detection")
+                logger.debug("All candidates failed display validation")
                 return nil
             }
             
-            if verbose { 
-                let aspectRatio = calculateDisplayAspectRatio(quad, imageSize: CGSize(width: image.width, height: image.height))
-                print("Display detected with aspect ratio: \(String(format: "%.2f", aspectRatio)), confidence: \(String(format: "%.3f", quad.confidence))")
-            }
+            let aspectRatio = calculateDisplayAspectRatio(quad, imageSize: CGSize(width: image.width, height: image.height))
+            logger.verbose("Display detected with aspect ratio: \(String(format: "%.2f", aspectRatio)), confidence: \(String(format: "%.3f", quad.confidence))")
             
             // Validate this looks like a real display
             if !isValidDisplayRectangle(quad, imageSize: CGSize(width: image.width, height: image.height), verbose: verbose) {
-                if verbose { print("Detected rectangle failed display validation") }
+                logger.verbose("Detected rectangle failed display validation")
                 return nil
             }
             
@@ -97,7 +142,8 @@ class ScreenDetector {
             return applyPerspectiveCorrection(to: image, rectangle: quad, verbose: verbose)
             
         } catch {
-            if verbose { print("Optimized Vision rectangle detection failed: \(error)") }
+            logger.verbose("Optimized Vision rectangle detection failed: \(error)")
+            logger.debug("Vision framework error details: \(error.localizedDescription)")
             return nil
         }
     }
@@ -650,8 +696,18 @@ class ScreenDetector {
         
         // Edge tracking (connect weak edges to strong edges)
         var changed = true
-        while changed {
+        var iterations = 0
+        let maxIterations = min(width * height / 10, 1000) // Reasonable upper bound based on image size
+        let startTime = CFAbsoluteTimeGetCurrent()
+        let timeout: CFAbsoluteTime = 5.0 // 5 seconds maximum processing time
+        
+        if verbose { print("Starting edge tracking with max iterations: \(maxIterations)") }
+        
+        while changed && iterations < maxIterations && (CFAbsoluteTimeGetCurrent() - startTime) < timeout {
             changed = false
+            iterations += 1
+            var changesThisIteration = 0
+            
             for y in 1..<(height - 1) {
                 for x in 1..<(width - 1) {
                     let index = y * width + x
@@ -672,9 +728,25 @@ class ScreenDetector {
                         if hasStrongNeighbor {
                             result[index] = 255
                             changed = true
+                            changesThisIteration += 1
                         }
                     }
                 }
+            }
+            
+            if verbose && iterations % 10 == 0 {
+                print("Edge tracking iteration \(iterations), changes: \(changesThisIteration)")
+            }
+        }
+        
+        let processingTime = CFAbsoluteTimeGetCurrent() - startTime
+        if verbose {
+            print("Edge tracking completed: \(iterations) iterations in \(String(format: "%.3f", processingTime))s")
+            if iterations >= maxIterations {
+                print("Warning: Edge tracking reached maximum iterations limit")
+            }
+            if processingTime >= timeout {
+                print("Warning: Edge tracking reached timeout limit")
             }
         }
         

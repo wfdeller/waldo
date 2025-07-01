@@ -159,9 +159,16 @@ struct StartOverlayCommand: ParsableCommand {
     @Flag(name: .shortAndLong, help: "Run in background (daemon mode)")
     var daemon: Bool = false
     
+    @Flag(name: .shortAndLong, help: "Show debug information for overlay startup")
+    var debug: Bool = false
+    
     func run() throws {
+        let logger = Logger(verbose: debug, debug: debug)
+        
         print("Waldo v\(Version.current)")
         print("Watermark pattern size: \(WatermarkConstants.PATTERN_SIZE) pixels")
+        
+        logger.debug("Starting overlay command with opacity: \(opacity), daemon: \(daemon)")
         
         // Validate opacity parameter
         guard opacity >= 1 && opacity <= 255 else {
@@ -171,12 +178,18 @@ struct StartOverlayCommand: ParsableCommand {
         
         let manager = OverlayWindowManager.shared
         
-        if manager.getStatus()["active"] as? Bool == true {
+        logger.debug("Checking if overlay is already active...")
+        let status = manager.getStatus()
+        logger.debug("Current status: \(status)")
+        
+        if status["active"] as? Bool == true {
+            logger.debug("Overlay already active, exiting")
             print("Error: Overlay is already running. Use 'waldo overlay stop' first.")
             throw ExitCode.failure
         }
         
-        manager.startOverlays(opacity: opacity)
+        logger.debug("Starting overlay manager...")
+        manager.startOverlays(opacity: opacity, logger: logger)
         
         // Display watermark details
         let systemInfo = SystemInfo.getSystemInfo()
@@ -217,22 +230,43 @@ struct StopOverlayCommand: ParsableCommand {
         abstract: "Stop transparent overlay watermarking"
     )
     
+    @Flag(name: .shortAndLong, help: "Show debug information for overlay shutdown")
+    var debug: Bool = false
+    
     func run() throws {
+        let logger = Logger(verbose: debug, debug: debug)
+        let stopTime = CFAbsoluteTimeGetCurrent()
+        
+        logger.debug("Starting overlay stop command")
+        
         let manager = OverlayWindowManager.shared
         
+        logger.debug("Checking current overlay status...")
+        let status = manager.getStatus()
+        logger.debug("Current status: \(status)")
+        
         // First try to stop local overlays (if running in same process)
-        manager.stopOverlays()
+        logger.debug("Attempting to stop local overlay manager...")
+        manager.stopOverlays(logger: logger)
         
         // Check for and terminate any waldo overlay start processes
         // (whether daemon or interactive) - this bypasses getStatus() issues
-        let terminatedCount = terminateOverlayProcesses()
+        logger.debug("Searching for external overlay processes...")
+        let terminatedCount = terminateOverlayProcesses(logger: logger)
+        
+        let totalStopTime = CFAbsoluteTimeGetCurrent() - stopTime
+        logger.timing("Total overlay stop operation", duration: totalStopTime)
         
         if terminatedCount == 0 {
+            logger.debug("No external processes found")
             print("No overlay processes are currently running.")
+        } else {
+            logger.debug("Terminated \(terminatedCount) external processes")
         }
     }
     
-    private func terminateOverlayProcesses() -> Int {
+    private func terminateOverlayProcesses(logger: Logger = Logger()) -> Int {
+        logger.debug("Using pgrep to find waldo overlay processes")
         // Use pgrep to find waldo processes - faster and more reliable than ps
         let task = Process()
         task.launchPath = "/usr/bin/pgrep"
@@ -300,15 +334,31 @@ struct StatusOverlayCommand: ParsableCommand {
     @Flag(name: .shortAndLong, help: "Show verbose output")
     var verbose: Bool = false
     
+    @Flag(name: .shortAndLong, help: "Show debug information for status check")
+    var debug: Bool = false
+    
     func run() throws {
+        let logger = Logger(verbose: verbose, debug: debug)
+        let statusTime = CFAbsoluteTimeGetCurrent()
+        
         print("Waldo v\(Version.current)")
         
+        logger.debug("Starting status check...")
+        
         let manager = OverlayWindowManager.shared
+        logger.debug("Getting status from overlay manager...")
         let status = manager.getStatus()
+        
+        logger.debug("Raw status data: \(status)")
+        
+        let statusCheckTime = CFAbsoluteTimeGetCurrent() - statusTime
+        logger.timing("Status check", duration: statusCheckTime)
         
         print("Desktop Overlay Status:")
         let isActive = status["active"] as? Bool == true
         let isDaemonDetected = status["daemonDetected"] as? Bool == true
+        
+        logger.debug("Processed status: active=\(isActive), daemon=\(isDaemonDetected)")
         
         print(".  Active: \(isActive ? "Yes" : "No")")
         print(".  Screens: \(status["screenCount"] ?? 0)")
