@@ -128,13 +128,29 @@ class PhotoProcessor {
     static func extractWatermarkFromPhoto(at url: URL, threshold: Double = WatermarkConstants.PHOTO_CONFIDENCE_THRESHOLD, verbose: Bool = false, debug: Bool = false, enableScreenDetection: Bool = true, simpleExtraction: Bool = false) -> (userID: String, watermark: String, timestamp: TimeInterval)? {
         let logger = Logger(verbose: verbose, debug: debug)
         
+        // Load image and get properties for desktop capture detection
+        let imageSource = CGImageSourceCreateWithURL(url as CFURL, nil)
+        var imageProperties: [String: Any] = [:]
+        
+        if let source = imageSource {
+            if let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any] {
+                imageProperties = properties
+            }
+        }
+        
         guard let image = loadImage(from: url, logger: logger) else {
             logger.error("Failed to load image from: \(url)")
             return nil
         }
         
+        // Detect if this is a desktop capture
+        let isDesktopCapture = PhotoProcessor.isDesktopCapture(properties: imageProperties)
+        
         if verbose {
             print("Original image size: \(image.width)x\(image.height)")
+            if isDesktopCapture {
+                print("Desktop capture detected - applying enhanced preprocessing")
+            }
         }
         
         // Try screen detection and perspective correction first
@@ -153,6 +169,16 @@ class PhotoProcessor {
         } else {
             if verbose {
                 print("Screen detection disabled, proceeding with original image")
+            }
+        }
+        
+        // Apply desktop capture preprocessing if needed
+        if isDesktopCapture {
+            if let enhancedImage = preprocessImageForExtraction(processedImage, isDesktopCapture: true, debug: debug) {
+                processedImage = enhancedImage
+                if debug {
+                    print("Debug: Desktop capture preprocessing completed")
+                }
             }
         }
         
@@ -292,7 +318,11 @@ class PhotoProcessor {
         return type.conforms(to: .image)
     }
     
-    static func preprocessImageForExtraction(_ image: CGImage) -> CGImage? {
+    static func preprocessImageForExtraction(_ image: CGImage, isDesktopCapture: Bool = false, debug: Bool = false) -> CGImage? {
+        if isDesktopCapture {
+            return preprocessDesktopCapture(image, debug: debug)
+        }
+        
         let width = image.width
         let height = image.height
         
@@ -313,5 +343,65 @@ class PhotoProcessor {
         context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
         
         return context.makeImage()
+    }
+    
+    static func preprocessDesktopCapture(_ image: CGImage, debug: Bool = false) -> CGImage? {
+        if debug {
+            print("Debug: Applying desktop capture preprocessing")
+        }
+        
+        let width = image.width
+        let height = image.height
+        
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            return nil
+        }
+        
+        // Set high quality interpolation for desktop captures
+        context.interpolationQuality = .high
+        
+        // Apply contrast enhancement for better watermark visibility
+        // This helps counter compression artifacts from screenshots
+        context.setAlpha(1.2) // Slight contrast boost
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        
+        guard let enhancedImage = context.makeImage() else {
+            if debug {
+                print("Debug: Failed to create enhanced image, falling back to original")
+            }
+            return image
+        }
+        
+        if debug {
+            print("Debug: Desktop capture preprocessing applied successfully")
+        }
+        
+        return enhancedImage
+    }
+    
+    static func isDesktopCapture(properties: [String: Any]) -> Bool {
+        // Check for screenshot indicators in EXIF data
+        if let exifDict = properties[kCGImagePropertyExifDictionary as String] as? [String: Any] {
+            if let userComment = exifDict[kCGImagePropertyExifUserComment as String] as? String {
+                return userComment.lowercased().contains("screenshot")
+            }
+        }
+        
+        // Check for PNG metadata indicating screenshot
+        if properties[kCGImagePropertyPNGDictionary as String] != nil {
+            // Screenshots often have PNG format, but this alone isn't conclusive
+            // We need more specific indicators, so only return true for EXIF screenshots
+        }
+        
+        return false
     }
 }

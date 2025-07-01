@@ -161,6 +161,9 @@ watermarked_desktop_*.png
 screenshots/
 test_images/
 
+# PNG images
+*.png
+
 # API keys and secrets
 secrets/
 keys/

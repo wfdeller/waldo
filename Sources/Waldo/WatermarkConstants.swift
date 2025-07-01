@@ -7,14 +7,14 @@ import Cocoa
 struct WatermarkConstants {
     
     /// Photo Confidence Threshold (lowered for enhanced detection)
-    static let PHOTO_CONFIDENCE_THRESHOLD = 0.6
+    static let PHOTO_CONFIDENCE_THRESHOLD = 0.3
     
     /// Variance threshold for adaptive thresholding (smooth vs noisy images)
     static let VARIANCE_THRESHOLD: Double = 400.0
     
     /// Threshold multipliers for adaptive detection
-    static let SMOOTH_IMAGE_MULTIPLIER: Double = 0.5  // More sensitive for smooth images
-    static let NOISY_IMAGE_MULTIPLIER: Double = 1.0   // Standard sensitivity for noisy images
+    static let SMOOTH_IMAGE_MULTIPLIER: Double = 0.3  // More sensitive for smooth images
+    static let NOISY_IMAGE_MULTIPLIER: Double = 0.7   // Enhanced sensitivity for noisy images
     
     // MARK: - RGB Encoding Values
     
@@ -23,7 +23,7 @@ struct WatermarkConstants {
     
     /// RGB modification strength for 1-bits (±delta from base)
     /// Higher values = more visible but more camera-detectable
-    static let RGB_DELTA: Int = 45         // Enhanced for camera detection
+    static let RGB_DELTA: Int = 65         // Enhanced for desktop capture detection
     
     /// Alpha opacity for overlay visibility (0-255)
     /// Higher values = more visible but more camera-detectable  
@@ -36,7 +36,7 @@ struct WatermarkConstants {
     
     /// Detection threshold for extraction (should be less than RGB_DELTA)
     /// Allows tolerance for camera compression/noise
-    static let DETECTION_THRESHOLD: Int = 25
+    static let DETECTION_THRESHOLD: Int = 35
     
     /// Detection tolerance for pattern matching (±pixels)
     /// Accounts for JPEG compression and camera processing
@@ -99,16 +99,18 @@ struct WatermarkConstants {
     
     // MARK: - Configuration Notes
     
-    /// Camera Detection Optimization:
-    /// - RGB_DELTA of 45 provides 17.6% signal strength for enhanced camera detection (45/255)
+    /// Desktop Capture Detection Optimization:
+    /// - RGB_DELTA of 65 provides 25.5% signal strength for enhanced desktop capture detection (65/255)
     /// - ALPHA_OPACITY of 40 provides 15.7% visibility (enhanced for detection) (40/255)
+    /// - PHOTO_CONFIDENCE_THRESHOLD lowered to 0.3 for more sensitive detection
+    /// - Adaptive thresholds made more sensitive for both smooth and noisy images
     /// - Primary detection relies on RGB patterns, not alpha opacity
-    /// - Values can be increased for stronger watermarks or decreased for subtlety
     ///
     /// Tuning Guidelines:
-    /// - Increase RGB_DELTA (25→35→45) for better camera detection
-    /// - Increase ALPHA_OPACITY (40→60→80) for more visible patterns
-    /// - Adjust PATTERN_SIZE (64→128) for different detection scales
+    /// - Increased RGB_DELTA (45→65) for better desktop capture detection
+    /// - Lowered PHOTO_CONFIDENCE_THRESHOLD (0.6→0.3) for more sensitive detection
+    /// - Enhanced DETECTION_THRESHOLD (25→35) to match increased RGB_DELTA
+    /// - More sensitive adaptive multipliers for compressed desktop captures
     /// - Keep DETECTION_THRESHOLD < RGB_DELTA for reliable extraction
     /// - Use --opacity parameter in CLI to override default for specific needs
 }
