@@ -125,7 +125,7 @@ class PhotoProcessor {
         return image
     }
     
-    static func extractWatermarkFromPhoto(at url: URL, threshold: Double = WatermarkConstants.PHOTO_CONFIDENCE_THRESHOLD, verbose: Bool = false, debug: Bool = false, enableScreenDetection: Bool = true) -> (userID: String, watermark: String, timestamp: TimeInterval)? {
+    static func extractWatermarkFromPhoto(at url: URL, threshold: Double = WatermarkConstants.PHOTO_CONFIDENCE_THRESHOLD, verbose: Bool = false, debug: Bool = false, enableScreenDetection: Bool = true, simpleExtraction: Bool = false) -> (userID: String, watermark: String, timestamp: TimeInterval)? {
         let logger = Logger(verbose: verbose, debug: debug)
         
         guard let image = loadImage(from: url, logger: logger) else {
@@ -156,21 +156,35 @@ class PhotoProcessor {
             }
         }
         
-        // Try robust extraction first (for camera photos) - ROI enhancement is now enabled by default
-        if let robustResult = WatermarkEngine.extractPhotoResistantWatermark(from: processedImage, threshold: threshold, verbose: verbose, debug: debug) {
-            return parseWatermark(robustResult)
-        }
-        
-        if debug {
-            print("Debug: Robust extraction failed, trying steganography fallback...")
-        }
-        
-        // Fall back to original steganography (for digital screenshots)  
-        if let stegoResult = SteganographyEngine.extractWatermark(from: processedImage) {
+        // Choose extraction method based on simpleExtraction flag
+        if simpleExtraction {
             if debug {
-                print("Debug: Steganography extraction succeeded")
+                print("Debug: Using simple LSB steganography extraction only")
             }
-            return stegoResult
+            // Go directly to LSB steganography for digital screenshots
+            if let stegoResult = SteganographyEngine.extractWatermark(from: processedImage) {
+                if debug {
+                    print("Debug: Simple steganography extraction succeeded")
+                }
+                return stegoResult
+            }
+        } else {
+            // Try robust extraction first (for camera photos) - ROI enhancement is now enabled by default
+            if let robustResult = WatermarkEngine.extractPhotoResistantWatermark(from: processedImage, threshold: threshold, verbose: verbose, debug: debug) {
+                return parseWatermark(robustResult)
+            }
+            
+            if debug {
+                print("Debug: Robust extraction failed, trying steganography fallback...")
+            }
+            
+            // Fall back to original steganography (for digital screenshots)  
+            if let stegoResult = SteganographyEngine.extractWatermark(from: processedImage) {
+                if debug {
+                    print("Debug: Steganography extraction succeeded")
+                }
+                return stegoResult
+            }
         }
         
         if debug {

@@ -175,3 +175,4 @@ mongo-data/
 # Test output
 test-results/
 coverage-reports/
+test_temp/

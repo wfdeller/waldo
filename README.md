@@ -1,8 +1,6 @@
 # Waldo - Watermark System
 
-A macOS steganographic identification system with camera-detectable transparent overlays, robust watermarking, and centralized analytics.
-
-**"Where's Waldo?"** - Now you can identify any desktop from a camera photo of the screen.
+A macOS steganographic identification system with camera-detectable transparent overlays and robust watermarking.
 
 ## Features
 
@@ -10,7 +8,7 @@ A macOS steganographic identification system with camera-detectable transparent 
 
 -   **Camera-Detectable Overlays**: Watermarks that survive camera photo capture
 -   **Multi-Layered Encoding**: Redundant embedding with error correction
--   **Spread Spectrum Techniques**: Frequency domain watermarking for robustness
+-   **LSB Steganography**: Least Significant Bit embedding for digital screenshots
 -   **Pattern Correlation**: Advanced pattern matching for camera photos
 
 ### Desktop Watermarking
@@ -25,34 +23,30 @@ A macOS steganographic identification system with camera-detectable transparent 
 -   **Robust Watermarking Engine**: DCT, redundant, and micro QR pattern embedding
 -   **Camera Photo Extraction**: Identify watermarks from phone photos of screens
 -   **Compression Resistant**: Survives JPEG compression, scaling, and camera noise
--   **Multiple Detection Methods**: Overlay extraction, spread spectrum, and pattern matching
+-   **Multiple Detection Methods**: Overlay extraction, spread spectrum, and LSB steganography
 
-### Centralized Logging
+### Testing & Validation
 
--   **MongoDB Database**: Stores all watermark events and analytics
--   **RESTful API**: Express.js server for real-time event logging
--   **Event Tracking**: Logs overlay start/stop, refreshes, and extractions
--   **No Local Database**: Deprecated SQLite in favor of centralized API
+-   **End-to-End Testing**: Complete overlay save and extract validation
+-   **Round-trip Verification**: Test watermark embedding and extraction cycles
+-   **Performance Benchmarking**: Debug timing and infinite loop protection
+-   **Multiple Extraction Methods**: Complex ROI processing and simple LSB extraction
 
 ## Quick Start
 
-### 1. Start the API Server
+### 1. Build and Test
 
 ```bash
-cd api
-npm install
-cp .env.example .env
-# Edit .env with your MongoDB connection
-npm start
-```
-
-### 2. Build and Run Desktop Application
-
-```bash
+# Build the application
 swift build
+# or
+make build
+
+# Run comprehensive test suite to validate functionality
+./test_roundtrip.sh
 ```
 
-### 3. Start Camera-Resistant Overlay
+### 2. Start Camera-Resistant Overlay
 
 ```bash
 # Start camera-detectable overlay watermarking
@@ -65,12 +59,12 @@ swift build
 ./.build/debug/waldo overlay stop
 ```
 
-### 4. Test Camera Detection
+### 3. Test Camera Detection
 
 ```bash
 # Take a photo of your screen with your phone/camera
 # Extract watermark from the camera photo
-./.build/debug/waldo extract ~/path/to/camera/photo.jpg
+./.build/debug/waldo extract ~/path/to/camera/photo.jpg --verbose
 ```
 
 ## Commands
@@ -79,27 +73,35 @@ swift build
 
 ```bash
 # Start transparent overlay watermarking
-waldo overlay start [--daemon] [--watermark "custom_text"]
+waldo overlay start [--daemon] [--opacity 40] [--verbose] [--debug]
 
 # Stop overlay watermarking
-waldo overlay stop
+waldo overlay stop [--verbose] [--debug]
 
 # Check overlay status and system info
-waldo overlay status [--verbose]
+waldo overlay status [--verbose] [--debug]
+
+# Save overlay as PNG for testing
+waldo overlay save-overlay test.png [--width 800] [--height 600] [--opacity 60] [--verbose] [--debug]
+
+# Debug screen information
+waldo overlay debug-screen
 ```
 
 ### Watermark Extraction
 
 ```bash
-# Extract watermark from camera photo of screen
+# Extract watermark from camera photo of screen (full pipeline)
 waldo extract "/path/to/camera/photo.jpg" --verbose
 
-# Extract watermark from digital screenshot
-waldo embed --user-id "alice" --output "test.png"
-waldo extract "test.png"
+# Extract using simple LSB steganography (fast, for testing)
+waldo extract "test.png" --simple-extraction --debug
 
-# Show current system user
-waldo users
+# Extract with specific threshold
+waldo extract "photo.jpg" --threshold 0.5 --no-screen-detection
+
+# Extract with debug information
+waldo extract "photo.jpg" --verbose --debug
 ```
 
 ### Makefile Commands
@@ -121,42 +123,266 @@ make clean
 make help
 ```
 
-## API Endpoints
+## End-to-End Testing
 
-### Event Logging
+### Complete Round-Trip Validation
 
--   `POST /api/events` - Log watermark events
--   `GET /api/events/user/:userId` - Get user events
--   `GET /api/events/active-overlays` - Get active overlays
--   `GET /api/events/search` - Search events
+The most reliable way to test Waldo's functionality is through end-to-end round-trip testing:
 
-### Analytics
+#### 1. Basic Round-Trip Test
 
--   `GET /api/analytics/dashboard` - Dashboard data
--   `GET /api/analytics/trends` - Trend analysis
--   `GET /api/analytics/top-users` - User activity
--   `GET /api/analytics/machine-activity` - Machine statistics
+```bash
+# Create a test overlay with embedded watermark
+waldo overlay save-overlay test_basic.png --width 400 --height 300 --opacity 100
+
+# Extract the watermark to verify it works
+waldo extract test_basic.png --simple-extraction
+
+# Expected output:
+# Watermark detected!
+# Username: your_username
+# Computer-name: Your-Computer-Name
+# Machine-uuid: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+# Timestamp: Dec 25, 2024 at 2:30:00 PM
+```
+
+#### 2. Comprehensive Testing Suite
+
+```bash
+# Test different image sizes
+waldo overlay save-overlay small.png --width 300 --height 200 --opacity 80
+waldo overlay save-overlay medium.png --width 800 --height 600 --opacity 60
+waldo overlay save-overlay large.png --width 1600 --height 1200 --opacity 100
+
+# Validate each overlay
+waldo extract small.png --simple-extraction
+waldo extract medium.png --simple-extraction
+waldo extract large.png --simple-extraction
+```
+
+#### 3. Debug Testing
+
+```bash
+# Create overlay with full debug information
+waldo overlay save-overlay debug_test.png --width 600 --height 400 --debug
+
+# Extract with detailed debug output
+waldo extract debug_test.png --simple-extraction --debug
+
+# This shows:
+# - File I/O operations and timing
+# - LSB steganography embedding/extraction process
+# - Performance metrics
+# - Error detection and handling
+```
+
+#### 4. Performance Benchmarking
+
+```bash
+# Test creation performance
+echo "Creating overlay..."
+time waldo overlay save-overlay benchmark.png --width 1920 --height 1080
+
+# Test extraction performance
+echo "Extracting watermark..."
+time waldo extract benchmark.png --simple-extraction
+
+# Compare extraction methods
+echo "=== Simple Extraction ==="
+time waldo extract benchmark.png --simple-extraction
+echo "=== Full Pipeline ==="
+time waldo extract benchmark.png --no-screen-detection
+```
+
+#### 5. Threshold Testing
+
+```bash
+# Create test overlay
+waldo overlay save-overlay threshold_test.png --width 400 --height 300
+
+# Test different confidence thresholds
+waldo extract threshold_test.png --simple-extraction --threshold 0.1
+waldo extract threshold_test.png --simple-extraction --threshold 0.5
+waldo extract threshold_test.png --simple-extraction --threshold 0.9
+```
+
+#### 6. Automated Test Script
+
+The project includes a comprehensive test script `test_roundtrip.sh` that validates the complete Waldo functionality:
+
+```bash
+# Run the complete test suite
+./test_roundtrip.sh
+
+# Run with verbose output
+./test_roundtrip.sh --verbose
+
+# Run with debug information
+./test_roundtrip.sh --debug
+
+# Keep test files for inspection
+./test_roundtrip.sh --keep-files
+
+# Show help
+./test_roundtrip.sh --help
+```
+
+**Test Script Features:**
+
+-   ✅ **8 Core Round-trip Tests**: Different image sizes and opacities
+-   ✅ **Performance Testing**: Creation and extraction timing
+-   ✅ **Threshold Testing**: Multiple confidence threshold validation
+-   ✅ **Edge Case Testing**: Very small images, extreme opacities
+-   ✅ **Colored Output**: Clear pass/fail indicators
+-   ✅ **Error Debugging**: Optional verbose and debug modes
+-   ✅ **Cleanup Management**: Automatic or optional file preservation
+
+**Expected Output:**
+
+```
+=== Waldo Round-trip Validation Test Suite ===
+Binary: ./.build/arm64-apple-macosx/debug/waldo
+Temp directory: ./test_temp
+
+=== Core Round-trip Tests ===
+Running Small overlay (300x200)... ✅ Small overlay (300x200) PASSED
+Running Medium overlay (800x600)... ✅ Medium overlay (800x600) PASSED
+Running Large overlay (1200x900)... ✅ Large overlay (1200x900) PASSED
+Running High opacity overlay... ✅ High opacity overlay PASSED
+Running Low opacity overlay... ✅ Low opacity overlay PASSED
+Running Square overlay... ✅ Square overlay PASSED
+Running Wide overlay (16:9)... ✅ Wide overlay (16:9) PASSED
+Running Tall overlay (9:16)... ✅ Tall overlay (9:16) PASSED
+
+=== Performance Testing ===
+Testing creation performance...
+✅ Overlay creation: 23ms
+Testing extraction performance...
+✅ Watermark extraction: 8ms
+
+=== Threshold Testing ===
+Testing threshold 0.1... ✅ PASSED
+Testing threshold 0.3... ✅ PASSED
+Testing threshold 0.5... ✅ PASSED
+Testing threshold 0.7... ✅ PASSED
+Testing threshold 0.9... ✅ PASSED
+Threshold tests: 5/5 passed
+
+=== Edge Case Testing ===
+Testing very small image (100x100)... ✅ PASSED
+Testing very high opacity (200)... ✅ PASSED
+Testing low opacity (10)... ✅ PASSED
+
+=== Test Results Summary ===
+✅ All core tests passed: 8/8
+🎉 Waldo round-trip validation: SUCCESS
+
+Next steps:
+  • Test with real camera photos: waldo overlay start && take photo && waldo extract photo.jpg
+  • Run performance benchmarks: time waldo overlay save-overlay test.png && time waldo extract test.png --simple-extraction
+  • Debug issues: waldo extract image.png --simple-extraction --debug
+```
+
+### Camera Photo Testing
+
+#### 1. Real Camera Test
+
+```bash
+# Start overlay on your screen
+waldo overlay start --opacity 60
+
+# Take a photo of your screen with a phone/camera
+# Save the photo to your computer
+
+# Extract watermark from camera photo
+waldo extract ~/Downloads/camera_photo.jpg --verbose
+
+# Clean up
+waldo overlay stop
+```
+
+#### 2. Expected Results
+
+**Successful Extraction Output:**
+
+```
+Waldo v2.1.0
+Using confidence threshold: 0.6
+Original image size: 3024x4032
+Screen detected and corrected, new size: 1800x1013
+Watermark detected!
+Username: alice
+Computer-name: Alices-MacBook-Pro
+Machine-uuid: A1B2C3D4-E5F6-7890-ABCD-EF1234567890
+Timestamp: Dec 25, 2024 at 2:30:00 PM
+```
+
+### Troubleshooting Tests
+
+#### 1. Debug Screen Detection Issues
+
+```bash
+# Check screen configuration
+waldo overlay debug-screen
+
+# Test screen detection specifically
+waldo extract photo.jpg --verbose --debug
+# Look for screen detection timing and failure analysis
+```
+
+#### 2. Performance Issues
+
+```bash
+# Use simple extraction to bypass complex processing
+waldo extract photo.jpg --simple-extraction --debug
+
+# Check for infinite loop protection
+# Look for "Edge tracking completed: X iterations" in output
+```
+
+#### 3. File Format Issues
+
+```bash
+# Test with debug to see file validation
+waldo extract suspicious_file.jpg --debug
+# Shows file size, format validation, and image properties
+```
+
+#### 4. Test Script Issues
+
+```bash
+# If test script fails, run with debug to see details
+./test_roundtrip.sh --debug
+
+# Keep test files for manual inspection
+./test_roundtrip.sh --keep-files
+
+# Check if waldo binary exists
+ls -la ./.build/arm64-apple-macosx/debug/waldo
+
+# Rebuild if binary is missing
+swift build
+```
 
 ## How It Works
 
 ### Camera-Resistant Overlay System
 
-1. **Multi-Layer Embedding**: Creates watermarks using multiple techniques:
-    - **Redundant embedding** with error correction across multiple screen regions
-    - **Micro QR patterns** embedded in corner regions for backup detection
-    - **Spread spectrum** watermarking using pseudo-random sequences
-2. **Overlay Creation**: Creates nearly invisible `NSWindow` with camera-detectable patterns
-3. **Adaptive Detection**: Uses correlation matching and pattern recognition for camera photos
-4. **Hourly Refresh**: Updates watermark data every hour for temporal tracking
-5. **API Logging**: Logs all events to MongoDB via REST API
+1. **LSB Steganography**: Embeds watermark data in the least significant bits of image pixels
+2. **Multi-Layer Embedding**: Creates watermarks using multiple techniques for redundancy
+3. **Overlay Creation**: Creates nearly invisible `NSWindow` with camera-detectable patterns
+4. **Adaptive Detection**: Uses correlation matching and pattern recognition for camera photos
+5. **Hourly Refresh**: Updates watermark data every hour for temporal tracking
 
 ### Robust Extraction Process
 
-1. **Overlay Pattern Detection**: Looks for characteristic overlay tile patterns
-2. **Redundant Extraction**: Samples multiple screen regions and uses majority voting
-3. **Pattern Correlation**: Matches extracted bits against expected watermark patterns
-4. **Error Correction**: Reconstructs watermark data using triple-repetition coding
-5. **Fallback Methods**: Uses spread spectrum and micro QR detection as backups
+1. **File Validation**: Comprehensive file format and size checking
+2. **Screen Detection**: Optional perspective correction for camera photos
+3. **Dual Extraction Paths**:
+    - **Complex ROI Pipeline**: Multi-region enhancement for camera photos
+    - **Simple LSB Extraction**: Fast steganographic decoding for digital screenshots
+4. **Error Correction**: Reconstructs watermark data with validation
+5. **Performance Protection**: Timeout and iteration limits prevent infinite loops
 
 ### Watermark Format
 
@@ -166,45 +392,40 @@ username:computer-name:machine-uuid:timestamp
 
 Example: `alice:Alices-MacBook-Pro:A1B2C3D4-E5F6:1703875200`
 
-### Event Types
-
--   `overlay_start` - Overlay watermarking started
--   `overlay_stop` - Overlay watermarking stopped
--   `watermark_refresh` - Hourly watermark update
--   `extraction` - Watermark detected in photo
--   `screen_change` - Display configuration changed
-
 ## Configuration
-
-### Environment Variables
-
-```bash
-# API Configuration
-WALDO_API_URL=http://localhost:3000/api
-WALDO_API_KEY=your-secure-api-key
-
-# MongoDB Connection
-MONGODB_URI=mongodb://localhost:27017/waldo
-
-# Server Settings
-PORT=3000
-NODE_ENV=production
-```
 
 ### macOS Permissions
 
 -   **Screen Recording Permission**: Required for overlay windows
 -   Automatically requests permission on first run
 
+### Command Line Options
+
+#### Save Overlay Options
+
+-   `--width`: Image width (default: 1920)
+-   `--height`: Image height (default: 1080)
+-   `--opacity`: Overlay opacity 1-255 (default: 40)
+-   `--debug`: Show debug information
+
+#### Extract Options
+
+-   `--threshold`: Confidence threshold 0.0-1.0 (default: 0.6)
+-   `--verbose`: Show detailed processing information
+-   `--debug`: Show debug information for failures
+-   `--no-screen-detection`: Skip screen detection and perspective correction
+-   `--simple-extraction`: Use fast LSB steganography only (skip complex ROI processing)
+
 ## Architecture
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│  macOS Client   │    │   Express API   │    │    MongoDB      │
+│  Overlay System │    │  Save Command   │    │ Extract Command │
 │                 │    │                 │    │                 │
-│ Overlay Windows │───▶│ Event Logging   │───▶│ Event Storage   │
-│ System Info     │    │ Analytics       │    │ User Tracking   │
-│ Steganography   │    │ RESTful Routes  │    │ Time Series     │
+│ NSWindow        │    │ LSB Embedding   │    │ ROI Processing  │
+│ Transparency    │───▶│ PNG Export      │───▶│ LSB Extraction  │
+│ Multi-Display   │    │ Debug Logging   │    │ Screen Detection│
+│ Auto-Refresh    │    │ Steganography   │    │ Pattern Matching│
 └─────────────────┘    └─────────────────┘    └─────────────────┘
 ```
 
@@ -231,12 +452,12 @@ NODE_ENV=production
 -   **Compliance monitoring**: Ensure regulatory compliance for data protection
 -   **Forensic investigation**: Reconstruct timeline of screen access events
 
-### 📊 System Analytics
+### 🧪 Testing & Development
 
--   **Real-time monitoring**: Track desktop watermarking across organization
--   **Multi-machine analytics**: Analyze patterns across multiple devices
--   **User behavior analysis**: Understand desktop usage patterns
--   **Security event correlation**: Connect watermark events with security incidents
+-   **Round-trip validation**: Verify watermark embedding and extraction
+-   **Performance benchmarking**: Test system performance and reliability
+-   **Format compatibility**: Validate different image sizes and formats
+-   **Debug troubleshooting**: Comprehensive diagnostic information
 
 ## Security Considerations
 
@@ -245,37 +466,15 @@ NODE_ENV=production
 -   **Nearly Invisible**: Camera-detectable but imperceptible to human vision
 -   **Robust Against Attacks**: Survives camera capture, compression, and scaling
 -   **Multiple Embedding Layers**: Redundant techniques prevent single-point failure
--   **Correlation Resistance**: Spread spectrum techniques resist statistical analysis
+-   **LSB Steganography**: Reliable bit-level embedding for digital screenshots
 
 ### 🏢 Enterprise Security
 
--   **Centralized Storage**: All data stored securely in MongoDB
--   **API Authentication**: Optional API key protection for secure logging
--   **Offline Resilience**: Works offline with automatic retry queue
--   **No Local Database**: Eliminates SQLite security concerns
+-   **Local Processing**: All watermark processing done locally
+-   **No Network Dependencies**: Works completely offline
 -   **Minimal Performance Impact**: Lightweight overlay rendering
 -   **Cross-Process Detection**: Status checking works across multiple processes
-
-## Database Schema
-
-```javascript
-{
-  eventType: "overlay_start|overlay_stop|watermark_refresh|extraction",
-  userId: String,
-  username: String,
-  computerName: String,
-  machineUUID: String,
-  watermarkData: String,
-  timestamp: Date,
-  metadata: Object,
-  parsedWatermark: {
-    username: String,
-    computerName: String,
-    machineUUID: String,
-    timestamp: Number
-  }
-}
-```
+-   **Timeout Protection**: Prevents infinite loops and system hangs
 
 ## Development
 
@@ -283,8 +482,7 @@ NODE_ENV=production
 
 -   macOS 13.0+
 -   Swift 5.9+
--   Node.js 18+
--   MongoDB 5.0+
+-   Xcode Command Line Tools
 
 ### Building
 
@@ -292,46 +490,75 @@ NODE_ENV=production
 # Swift application
 swift build
 
-# API server
-cd api && npm install && npm start
+# Using Make
+make build
 
-# MongoDB (via Homebrew)
-brew install mongodb-community && brew services start mongodb-community
+# Install system-wide
+make install
 ```
 
 ### Testing
+
+#### Comprehensive Test Suite
+
+**Automated Testing (Recommended):**
+
+```bash
+# Build first, then run comprehensive test suite
+swift build
+./test_roundtrip.sh
+
+# For detailed output
+./test_roundtrip.sh --verbose --debug
+```
+
+**Manual Testing:**
+
+```bash
+# Quick validation (30 seconds)
+waldo overlay save-overlay quick.png --width 400 --height 300
+waldo extract quick.png --simple-extraction
+
+# Full validation (2 minutes)
+waldo overlay save-overlay full.png --width 1024 --height 768 --debug
+waldo extract full.png --simple-extraction --verbose --debug
+
+# Performance benchmark
+time waldo overlay save-overlay perf.png --width 1920 --height 1080
+time waldo extract perf.png --simple-extraction
+```
 
 #### Camera-Resistant Watermarking Test
 
 ```bash
 # Start camera-detectable overlay
-./.build/debug/waldo overlay start
+waldo overlay start --opacity 60
 
 # Take photo of screen with phone/camera
 # Extract watermark from camera photo
-./.build/debug/waldo extract ~/path/to/camera_photo.jpg
+waldo extract ~/path/to/camera_photo.jpg --verbose
 
 # Expected output:
-# 🔍 Watermark detected!
+# Watermark detected!
 # Username: your_username
 # Computer: Your-Computer-Name
+
+# Clean up
+waldo overlay stop
 ```
 
-#### Traditional Screenshot Test
+#### Edge Case Testing
 
 ```bash
-# Test digital screenshot watermarking
-./.build/debug/waldo embed --user-id "test" --output "test.png"
-./.build/debug/waldo extract "test.png"
-```
+# Test with various file formats
+waldo extract test.jpg --simple-extraction
+waldo extract test.png --simple-extraction
+waldo extract test.heic --simple-extraction
 
-#### API Testing
-
-```bash
-# Test API endpoints
-curl -X POST localhost:3000/api/events \
-  -H "Content-Type: application/json" \
-  -d '{"eventType":"test","userId":"test_user",...}'
+# Test error conditions
+waldo extract nonexistent.png --debug
+waldo extract corrupted.jpg --debug
+waldo extract empty_file.png --debug
 ```
 
 ## Key Innovation
@@ -340,9 +567,17 @@ curl -X POST localhost:3000/api/events \
 
 ### Technical Achievement
 
--   **50%+ correlation accuracy** for camera photo detection
--   **Multi-layered redundancy** with error correction
--   **Real-time invisible watermarking** across all displays
--   **Enterprise-grade logging and analytics**
+-   **Robust LSB steganography** for digital screenshot watermarking
+-   **Camera-resistant overlay** watermarking across all displays
+-   **End-to-end validation** with comprehensive testing framework
+-   **Performance protection** with timeout and infinite loop prevention
+-   **Dual extraction paths** for both digital and camera photo sources
 
-This system provides comprehensive desktop identification with camera-resistant watermarking capabilities.
+### Testing Innovation
+
+-   **Round-trip validation**: Complete save→extract→verify workflow
+-   **Performance benchmarking**: Timing analysis and bottleneck identification
+-   **Debug system**: Comprehensive diagnostic and troubleshooting information
+-   **Automated testing**: Scriptable validation for continuous integration
+
+This system provides comprehensive desktop identification with camera-resistant watermarking capabilities and robust testing infrastructure.
