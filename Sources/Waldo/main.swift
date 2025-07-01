@@ -32,6 +32,9 @@ struct ExtractCommand: ParsableCommand {
     @Flag(name: .shortAndLong, help: "Show debug information for detection failures")
     var debug: Bool = false
     
+    @Flag(name: .long, help: "Skip automatic screen detection and perspective correction")
+    var noScreenDetection: Bool = false
+    
     func run() throws {
         print("Waldo v\(Version.current)")
         
@@ -57,7 +60,7 @@ struct ExtractCommand: ParsableCommand {
             print("Using confidence threshold: \(threshold)")
         }
         
-        if let result = PhotoProcessor.extractWatermarkFromPhoto(at: photoURL, threshold: threshold, verbose: verbose, debug: debug) {
+        if let result = PhotoProcessor.extractWatermarkFromPhoto(at: photoURL, threshold: threshold, verbose: verbose, debug: debug, enableScreenDetection: !noScreenDetection) {
             print("Watermark detected!")
             
             // Display raw watermark data split on ":"

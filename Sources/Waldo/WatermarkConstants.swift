@@ -42,6 +42,35 @@ struct WatermarkConstants {
     /// Accounts for JPEG compression and camera processing
     static let DETECTION_TOLERANCE: Int = 20
     
+    // MARK: - QR Code Detection
+    
+    /// Fixed threshold for binary QR detection (fallback)
+    static let QR_BINARY_THRESHOLD: Int = 127
+    
+    /// Sample radius for adaptive threshold calculation 
+    static let QR_THRESHOLD_SAMPLE_RADIUS: Int = 5
+    
+    /// Finder pattern validation tolerance (0.0-1.0)
+    /// 0.8 = allow 20% pixel mismatches for noise tolerance
+    static let QR_FINDER_PATTERN_TOLERANCE: Double = 0.8
+    
+    // MARK: - Version 2 QR Code Constants
+    
+    /// Version 2 QR code module size (37x37)
+    static let QR_VERSION2_SIZE: Int = 37
+    
+    /// Pixels per QR module for Version 2 overlay codes
+    static let QR_VERSION2_PIXELS_PER_MODULE: Int = 5
+    
+    /// Total pixel size for Version 2 QR codes (37 * 5 = 185)
+    static let QR_VERSION2_PIXEL_SIZE: Int = QR_VERSION2_SIZE * QR_VERSION2_PIXELS_PER_MODULE
+    
+    /// Enhanced margin for Version 2 QR codes
+    static let QR_VERSION2_MARGIN: Int = 15
+    
+    /// Enhanced menu bar offset for Version 2 QR codes
+    static let QR_VERSION2_MENU_BAR_OFFSET: Int = 50
+    
     // MARK: - Window Positioning
     
     /// Window level adjustment for overlay positioning

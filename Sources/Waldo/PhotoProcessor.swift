@@ -21,14 +21,37 @@ class PhotoProcessor {
         return image
     }
     
-    static func extractWatermarkFromPhoto(at url: URL, threshold: Double = WatermarkConstants.PHOTO_CONFIDENCE_THRESHOLD, verbose: Bool = false, debug: Bool = false) -> (userID: String, watermark: String, timestamp: TimeInterval)? {
+    static func extractWatermarkFromPhoto(at url: URL, threshold: Double = WatermarkConstants.PHOTO_CONFIDENCE_THRESHOLD, verbose: Bool = false, debug: Bool = false, enableScreenDetection: Bool = true) -> (userID: String, watermark: String, timestamp: TimeInterval)? {
         guard let image = loadImage(from: url) else {
             print("Failed to load image from: \(url)")
             return nil
         }
         
-        // Try robust extraction first (for camera photos)
-        if let robustResult = WatermarkEngine.extractPhotoResistantWatermark(from: image, threshold: threshold, verbose: verbose, debug: debug) {
+        if verbose {
+            print("Original image size: \(image.width)x\(image.height)")
+        }
+        
+        // Try screen detection and perspective correction first
+        var processedImage = image
+        if enableScreenDetection {
+            if let correctedImage = ScreenDetector.detectAndCorrectScreen(from: image, verbose: verbose) {
+                if verbose {
+                    print("Screen detected and corrected, new size: \(correctedImage.width)x\(correctedImage.height)")
+                }
+                processedImage = correctedImage
+            } else {
+                if verbose {
+                    print("No screen detected, proceeding with original image")
+                }
+            }
+        } else {
+            if verbose {
+                print("Screen detection disabled, proceeding with original image")
+            }
+        }
+        
+        // Try robust extraction first (for camera photos) - ROI enhancement is now enabled by default
+        if let robustResult = WatermarkEngine.extractPhotoResistantWatermark(from: processedImage, threshold: threshold, verbose: verbose, debug: debug) {
             return parseWatermark(robustResult)
         }
         
@@ -37,7 +60,7 @@ class PhotoProcessor {
         }
         
         // Fall back to original steganography (for digital screenshots)  
-        if let stegoResult = SteganographyEngine.extractWatermark(from: image) {
+        if let stegoResult = SteganographyEngine.extractWatermark(from: processedImage) {
             if debug {
                 print("Debug: Steganography extraction succeeded")
             }
@@ -46,26 +69,45 @@ class PhotoProcessor {
         
         if debug {
             print("Debug: All extraction methods failed")
-            print("Debug: Image size: \(image.width)x\(image.height)")
+            print("Debug: Processed image size: \(processedImage.width)x\(processedImage.height)")
             print("Debug: Threshold used: \(threshold)")
         }
         
         return nil
     }
     
-    static func extractWatermarkFromPhotoData(_ data: Data, threshold: Double = WatermarkConstants.PHOTO_CONFIDENCE_THRESHOLD) -> (userID: String, watermark: String, timestamp: TimeInterval)? {
+    static func extractWatermarkFromPhotoData(_ data: Data, threshold: Double = WatermarkConstants.PHOTO_CONFIDENCE_THRESHOLD, verbose: Bool = false, debug: Bool = false, enableScreenDetection: Bool = true) -> (userID: String, watermark: String, timestamp: TimeInterval)? {
         guard let image = loadImage(from: data) else {
             print("Failed to load image from data")
             return nil
         }
         
-        // Try robust extraction first (for camera photos)
-        if let robustResult = WatermarkEngine.extractPhotoResistantWatermark(from: image, threshold: threshold) {
+        // Try screen detection and perspective correction first
+        var processedImage = image
+        if enableScreenDetection {
+            if let correctedImage = ScreenDetector.detectAndCorrectScreen(from: image, verbose: verbose) {
+                if verbose {
+                    print("Screen detected and corrected from data, new size: \(correctedImage.width)x\(correctedImage.height)")
+                }
+                processedImage = correctedImage
+            } else {
+                if verbose {
+                    print("No screen detected in data, proceeding with original image")
+                }
+            }
+        } else {
+            if verbose {
+                print("Screen detection disabled for data, proceeding with original image")
+            }
+        }
+        
+        // Try robust extraction first (for camera photos) - ROI enhancement is now enabled by default
+        if let robustResult = WatermarkEngine.extractPhotoResistantWatermark(from: processedImage, threshold: threshold, verbose: verbose, debug: debug) {
             return parseWatermark(robustResult)
         }
         
         // Fall back to original steganography (for digital screenshots)
-        return SteganographyEngine.extractWatermark(from: image)
+        return SteganographyEngine.extractWatermark(from: processedImage)
     }
     
     private static func parseWatermark(_ watermarkString: String) -> (userID: String, watermark: String, timestamp: TimeInterval)? {
