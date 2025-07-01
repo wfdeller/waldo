@@ -100,8 +100,8 @@ struct WatermarkConstants {
     // MARK: - Configuration Notes
     
     /// Camera Detection Optimization:
-    /// - RGB_DELTA of 45 provides 18% signal strength for enhanced camera detection
-    /// - ALPHA_OPACITY of 40 provides 16% visibility (enhanced for detection)
+    /// - RGB_DELTA of 45 provides 17.6% signal strength for enhanced camera detection (45/255)
+    /// - ALPHA_OPACITY of 40 provides 15.7% visibility (enhanced for detection) (40/255)
     /// - Primary detection relies on RGB patterns, not alpha opacity
     /// - Values can be increased for stronger watermarks or decreased for subtlety
     ///

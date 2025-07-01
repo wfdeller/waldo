@@ -88,7 +88,7 @@ class WatermarkOverlayView: NSView {
     
     private func generateMicroQRPattern(from data: String) -> [UInt8] {
         // Create Version 2 QR code (37x37) with high error correction
-        let qrSize = 37  // Version 2 QR code size (was 25 for micro)
+        let qrSize = WatermarkConstants.QR_VERSION2_SIZE  // Version 2 QR code size (was 25 for micro)
         var pattern = [UInt8](repeating: 0, count: qrSize * qrSize)
         
         // Draw three finder patterns (classic QR code corners)
@@ -100,6 +100,7 @@ class WatermarkOverlayView: NSView {
         drawSeparatorPatterns(&pattern, size: qrSize)
         
         // Draw alignment pattern for Version 2 (center: 18,18)
+        // For Version 2 QR codes, alignment pattern is at (18,18) - offset by 2 for 5x5 pattern
         drawAlignmentPattern(&pattern, size: qrSize, x: 16, y: 16)  // 5x5 pattern centered at (18,18)
         
         // Draw timing patterns (horizontal and vertical lines)
@@ -181,7 +182,7 @@ class WatermarkOverlayView: NSView {
                 let inTopLeftFinder = (x < 9 && y < 9)
                 let inTopRightFinder = (x >= size-8 && y < 9)
                 let inBottomLeftFinder = (x < 9 && y >= size-8)
-                let inAlignment = (x >= 14 && x <= 20 && y >= 14 && y <= 20)  // Version 2 alignment at (18,18)
+                let inAlignment = (x >= 16 && x <= 20 && y >= 16 && y <= 20)  // Version 2 alignment at (18,18) - 5x5 pattern
                 let inTiming = (x == 6 || y == 6)
                 let inFormatInfo = isFormatInformationArea(x: x, y: y, size: size)
                 
@@ -328,7 +329,7 @@ class WatermarkOverlayView: NSView {
                         
                         // Check if this position is available for data
                         let inFinder = isFinderPatternArea(x: x, y: y, size: size)
-                        let inAlignment = (x >= 14 && x <= 20 && y >= 14 && y <= 20)
+                        let inAlignment = (x >= 16 && x <= 20 && y >= 16 && y <= 20)  // Version 2 alignment at (18,18)
                         let inTiming = (x == 6 || y == 6)
                         let inFormat = isFormatInformationArea(x: x, y: y, size: size)
                         
@@ -432,16 +433,18 @@ class WatermarkOverlayView: NSView {
     }
     
     private func drawCornerQRCodes(in context: CGContext, viewSize: CGSize, backingScaleFactor: CGFloat) {
-        // Version 2 QR codes (37x37) with blue channel modulation for better camera detection
-        let qrPixelSize = 37  // Version 2 QR code size (upgraded from 25)
-        let pixelsPerQRBit: CGFloat = 5  // Each QR bit rendered as 5x5 pixels (increased from 4)
-        let qrSize: CGFloat = CGFloat(qrPixelSize) * pixelsPerQRBit  // 37 * 5 = 185 pixels
-        let margin: CGFloat = 15   // Increased margin for larger QR codes
-        let menuBarOffset: CGFloat = 50  // Increased offset for larger QR codes
+        // Version 2 QR codes with blue channel modulation for better camera detection
+        let qrPixelSize = WatermarkConstants.QR_VERSION2_SIZE  // Version 2 QR code modules
+        let pixelsPerQRBit: CGFloat = CGFloat(WatermarkConstants.QR_VERSION2_PIXELS_PER_MODULE)  // Pixels per QR module
+        let qrSize: CGFloat = CGFloat(WatermarkConstants.QR_VERSION2_PIXEL_SIZE)  // Total pixel size
+        let margin: CGFloat = CGFloat(WatermarkConstants.QR_VERSION2_MARGIN)   // Consistent margin
+        let menuBarOffset: CGFloat = CGFloat(WatermarkConstants.QR_VERSION2_MENU_BAR_OFFSET)  // Consistent offset
         
         // Generate QR pattern for current watermark data
         let qrPattern = generateMicroQRPattern(from: watermarkData)
-        print("QR pattern generated: \(qrPattern.count) elements, expected \(qrPixelSize * qrPixelSize)")
+        if qrPattern.count != qrPixelSize * qrPixelSize {
+            print("Warning: QR pattern size mismatch: \(qrPattern.count) elements, expected \(qrPixelSize * qrPixelSize)")
+        }
         
         // Define corner positions
         let corners = [

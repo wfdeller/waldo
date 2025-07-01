@@ -40,9 +40,72 @@ class ScreenDetector {
     // MARK: - Vision Framework Rectangle Detection
     
     private static func detectScreenWithVision(image: CGImage, verbose: Bool) -> CGImage? {
+        // Try optimized display detection first
+        if let displayResult = detectDisplayRectangleOptimized(image: image, verbose: verbose) {
+            return displayResult
+        }
+        
+        if verbose { print("Optimized display detection failed, trying general rectangle detection...") }
+        
+        // Fallback to general rectangle detection
+        return detectScreenWithGeneralVision(image: image, verbose: verbose)
+    }
+    
+    private static func detectDisplayRectangleOptimized(image: CGImage, verbose: Bool) -> CGImage? {
+        if verbose { print("Starting optimized display rectangle detection...") }
+        
+        let rectRequest = VNDetectRectanglesRequest()
+        
+        // Optimized parameters for display/monitor detection
+        rectRequest.minimumAspectRatio = 1.2    // Accommodate 4:3 displays (1.33) with tolerance
+        rectRequest.maximumAspectRatio = 2.6    // Covers ultrawide monitors (21:9 ≈ 2.33) with tolerance
+        rectRequest.minimumSize = 0.15         // Display should be significant portion of photo (relaxed)
+        rectRequest.maximumObservations = 3    // Allow a few candidates for better selection
+        rectRequest.minimumConfidence = 0.6    // Balanced confidence for reliable detection
+        rectRequest.quadratureTolerance = 15.0 // Allow some perspective distortion (degrees)
+        
+        let handler = VNImageRequestHandler(cgImage: image)
+        
+        do {
+            try handler.perform([rectRequest])
+            
+            guard let results = rectRequest.results, !results.isEmpty else {
+                if verbose { print("No display rectangle detected by optimized Vision detection") }
+                return nil
+            }
+            
+            // Find the best display candidate from multiple results
+            let bestQuad = findBestDisplayRectangle(results, imageSize: CGSize(width: image.width, height: image.height), verbose: verbose)
+            
+            guard let quad = bestQuad else {
+                if verbose { print("No suitable display rectangle found in optimized detection") }
+                return nil
+            }
+            
+            if verbose { 
+                let aspectRatio = calculateDisplayAspectRatio(quad, imageSize: CGSize(width: image.width, height: image.height))
+                print("Display detected with aspect ratio: \(String(format: "%.2f", aspectRatio)), confidence: \(String(format: "%.3f", quad.confidence))")
+            }
+            
+            // Validate this looks like a real display
+            if !isValidDisplayRectangle(quad, imageSize: CGSize(width: image.width, height: image.height), verbose: verbose) {
+                if verbose { print("Detected rectangle failed display validation") }
+                return nil
+            }
+            
+            // Convert quad's normalized corners to real image coordinates and apply correction
+            return applyPerspectiveCorrection(to: image, rectangle: quad, verbose: verbose)
+            
+        } catch {
+            if verbose { print("Optimized Vision rectangle detection failed: \(error)") }
+            return nil
+        }
+    }
+    
+    private static func detectScreenWithGeneralVision(image: CGImage, verbose: Bool) -> CGImage? {
         let request = VNDetectRectanglesRequest()
-        request.maximumObservations = 10
-        request.minimumAspectRatio = 0.3
+        request.maximumObservations = 5
+        request.minimumAspectRatio = 0.8
         request.maximumAspectRatio = 3.0
         request.minimumSize = 0.1
         request.minimumConfidence = 0.5
@@ -53,11 +116,11 @@ class ScreenDetector {
             try handler.perform([request])
             
             guard let results = request.results, !results.isEmpty else {
-                if verbose { print("No rectangles detected by Vision framework") }
+                if verbose { print("No rectangles detected by general Vision framework") }
                 return nil
             }
             
-            if verbose { print("Vision detected \(results.count) rectangles") }
+            if verbose { print("General Vision detected \(results.count) rectangles") }
             
             // Find the best rectangle (largest, most screen-like)
             let bestRectangle = findBestScreenRectangle(results, imageSize: CGSize(width: image.width, height: image.height), verbose: verbose)
@@ -71,7 +134,7 @@ class ScreenDetector {
             return applyPerspectiveCorrection(to: image, rectangle: rectangle, verbose: verbose)
             
         } catch {
-            if verbose { print("Vision rectangle detection failed: \(error)") }
+            if verbose { print("General Vision rectangle detection failed: \(error)") }
             return nil
         }
     }
@@ -227,45 +290,185 @@ class ScreenDetector {
             return nil
         }
         
-        if verbose { print("Applying perspective correction with corners: \(corners)") }
+        if verbose { print("Applying enhanced CIFilter perspective warp with corners: \(corners)") }
         
-        // Calculate output dimensions based on corner distances
-        let width1 = distance(corners[0], corners[1])
-        let width2 = distance(corners[2], corners[3])
-        let height1 = distance(corners[0], corners[3])
-        let height2 = distance(corners[1], corners[2])
+        // Calculate optimal output dimensions preserving aspect ratio
+        let outputDimensions = calculateOptimalOutputDimensions(corners: corners, verbose: verbose)
         
-        let outputWidth = Int(max(width1, width2))
-        let outputHeight = Int(max(height1, height2))
+        if verbose { 
+            print("Calculated output dimensions: \(outputDimensions.width)x\(outputDimensions.height)")
+        }
         
-        if verbose { print("Output dimensions: \(outputWidth)x\(outputHeight)") }
+        // Apply enhanced perspective warp using CIFilter
+        return applyEnhancedPerspectiveWarp(to: image, sourceCorners: corners, outputSize: outputDimensions, verbose: verbose)
+    }
+    
+    private static func calculateOptimalOutputDimensions(corners: [CGPoint], verbose: Bool) -> CGSize {
+        // Calculate all four edge lengths
+        let topWidth = distance(corners[0], corners[1])      // Top edge
+        let bottomWidth = distance(corners[3], corners[2])   // Bottom edge  
+        let leftHeight = distance(corners[0], corners[3])    // Left edge
+        let rightHeight = distance(corners[1], corners[2])   // Right edge
         
-        // Set up perspective transform
-        let sourceQuad = corners
+        // Use the longer edges to preserve maximum detail
+        let outputWidth = max(topWidth, bottomWidth)
+        let outputHeight = max(leftHeight, rightHeight)
         
-        // Apply perspective transformation using Core Image
+        if verbose {
+            print("Edge lengths - Top: \(String(format: "%.1f", topWidth)), Bottom: \(String(format: "%.1f", bottomWidth)), Left: \(String(format: "%.1f", leftHeight)), Right: \(String(format: "%.1f", rightHeight))")
+        }
+        
+        // Ensure reasonable minimum dimensions
+        let minDimension: Double = 100
+        let finalWidth = max(outputWidth, minDimension)
+        let finalHeight = max(outputHeight, minDimension)
+        
+        return CGSize(width: finalWidth, height: finalHeight)
+    }
+    
+    private static func applyEnhancedPerspectiveWarp(to image: CGImage, sourceCorners: [CGPoint], outputSize: CGSize, verbose: Bool) -> CGImage? {
+        // Create CIImage from input
         let ciImage = CIImage(cgImage: image)
-        let perspectiveFilter = CIFilter(name: "CIPerspectiveCorrection")!
         
+        // Create perspective correction filter
+        guard let perspectiveFilter = CIFilter(name: "CIPerspectiveCorrection") else {
+            if verbose { print("Failed to create CIPerspectiveCorrection filter") }
+            return nil
+        }
+        
+        // Set input image
         perspectiveFilter.setValue(ciImage, forKey: kCIInputImageKey)
-        perspectiveFilter.setValue(CIVector(CGPoint: sourceQuad[0]), forKey: "inputTopLeft")
-        perspectiveFilter.setValue(CIVector(CGPoint: sourceQuad[1]), forKey: "inputTopRight")  
-        perspectiveFilter.setValue(CIVector(CGPoint: sourceQuad[2]), forKey: "inputBottomRight")
-        perspectiveFilter.setValue(CIVector(CGPoint: sourceQuad[3]), forKey: "inputBottomLeft")
         
-        guard let outputCIImage = perspectiveFilter.outputImage else {
-            if verbose { print("Perspective correction filter failed") }
+        // Set source corner points (in image coordinate system)
+        perspectiveFilter.setValue(CIVector(x: sourceCorners[0].x, y: sourceCorners[0].y), forKey: "inputTopLeft")
+        perspectiveFilter.setValue(CIVector(x: sourceCorners[1].x, y: sourceCorners[1].y), forKey: "inputTopRight")
+        perspectiveFilter.setValue(CIVector(x: sourceCorners[2].x, y: sourceCorners[2].y), forKey: "inputBottomRight")
+        perspectiveFilter.setValue(CIVector(x: sourceCorners[3].x, y: sourceCorners[3].y), forKey: "inputBottomLeft")
+        
+        // Get the perspective-corrected output
+        guard let perspectiveCorrectedImage = perspectiveFilter.outputImage else {
+            if verbose { print("CIPerspectiveCorrection filter failed to produce output") }
             return nil
         }
         
-        let ciContext = CIContext()
-        guard let correctedImage = ciContext.createCGImage(outputCIImage, from: outputCIImage.extent) else {
-            if verbose { print("Failed to create corrected CGImage") }
+        // Apply additional transform to ensure proper rectangular output
+        let finalImage = cropAndScaleToPerfectRectangle(perspectiveCorrectedImage, targetSize: outputSize, verbose: verbose)
+        
+        // Render to CGImage with optimized context
+        let ciContext = CIContext(options: [
+            .workingColorSpace: CGColorSpaceCreateDeviceRGB(),
+            .outputColorSpace: CGColorSpaceCreateDeviceRGB(),
+            .useSoftwareRenderer: false  // Use GPU acceleration when available
+        ])
+        
+        let outputRect = CGRect(origin: .zero, size: outputSize)
+        guard let correctedCGImage = ciContext.createCGImage(finalImage, from: outputRect) else {
+            if verbose { print("Failed to render corrected image to CGImage") }
             return nil
         }
         
-        if verbose { print("Perspective correction completed successfully") }
-        return correctedImage
+        if verbose { 
+            print("Enhanced perspective warp completed successfully")
+            print("Final output: \(correctedCGImage.width)x\(correctedCGImage.height) pixels")
+        }
+        
+        return correctedCGImage
+    }
+    
+    private static func cropAndScaleToPerfectRectangle(_ image: CIImage, targetSize: CGSize, verbose: Bool) -> CIImage {
+        // Get the extent of the perspective-corrected image
+        let imageExtent = image.extent
+        
+        if verbose {
+            print("Perspective corrected extent: \(imageExtent)")
+        }
+        
+        // If the image extent is infinite or very large, crop it to a reasonable size
+        let croppedImage: CIImage
+        if imageExtent.isInfinite || imageExtent.width > targetSize.width * 2 || imageExtent.height > targetSize.height * 2 {
+            // Crop to approximately the target size, centered
+            let cropRect = CGRect(
+                x: max(0, imageExtent.midX - targetSize.width / 2),
+                y: max(0, imageExtent.midY - targetSize.height / 2),
+                width: targetSize.width,
+                height: targetSize.height
+            )
+            croppedImage = image.cropped(to: cropRect)
+            
+            if verbose {
+                print("Cropped to: \(cropRect)")
+            }
+        } else {
+            croppedImage = image
+        }
+        
+        // Scale to exact target dimensions if needed
+        let currentSize = croppedImage.extent.size
+        if currentSize.width != targetSize.width || currentSize.height != targetSize.height {
+            let scaleX = targetSize.width / currentSize.width
+            let scaleY = targetSize.height / currentSize.height
+            
+            let scaledImage = croppedImage.transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
+            
+            if verbose {
+                print("Scaled by \(String(format: "%.3f", scaleX))x, \(String(format: "%.3f", scaleY))x to target size")
+            }
+            
+            return scaledImage
+        }
+        
+        return croppedImage
+    }
+    
+    // Alternative perspective warp using CIPerspectiveTransform for maximum control
+    private static func applyAdvancedPerspectiveWarp(to image: CGImage, sourceCorners: [CGPoint], outputSize: CGSize, verbose: Bool) -> CGImage? {
+        if verbose { print("Applying advanced perspective warp with CIPerspectiveTransform") }
+        
+        let ciImage = CIImage(cgImage: image)
+        
+        // CIPerspectiveTransform will automatically map to perfect rectangle output
+        
+        // Create perspective transform filter
+        guard let perspectiveTransform = CIFilter(name: "CIPerspectiveTransform") else {
+            if verbose { print("Failed to create CIPerspectiveTransform filter") }
+            return nil
+        }
+        
+        // Set input image
+        perspectiveTransform.setValue(ciImage, forKey: kCIInputImageKey)
+        
+        // Set source corners (where the quadrilateral currently is)
+        perspectiveTransform.setValue(CIVector(x: sourceCorners[0].x, y: sourceCorners[0].y), forKey: "inputTopLeft")
+        perspectiveTransform.setValue(CIVector(x: sourceCorners[1].x, y: sourceCorners[1].y), forKey: "inputTopRight")
+        perspectiveTransform.setValue(CIVector(x: sourceCorners[2].x, y: sourceCorners[2].y), forKey: "inputBottomRight")
+        perspectiveTransform.setValue(CIVector(x: sourceCorners[3].x, y: sourceCorners[3].y), forKey: "inputBottomLeft")
+        
+        // Get transformed output
+        guard let transformedImage = perspectiveTransform.outputImage else {
+            if verbose { print("CIPerspectiveTransform filter failed to produce output") }
+            return nil
+        }
+        
+        // Render with optimized context
+        let ciContext = CIContext(options: [
+            .workingColorSpace: CGColorSpaceCreateDeviceRGB(),
+            .outputColorSpace: CGColorSpaceCreateDeviceRGB(),
+            .useSoftwareRenderer: false
+        ])
+        
+        // Create output rectangle
+        let outputRect = CGRect(origin: .zero, size: outputSize)
+        
+        guard let finalImage = ciContext.createCGImage(transformedImage, from: outputRect) else {
+            if verbose { print("Failed to render advanced perspective warp to CGImage") }
+            return nil
+        }
+        
+        if verbose {
+            print("Advanced perspective warp completed: \(finalImage.width)x\(finalImage.height)")
+        }
+        
+        return finalImage
     }
     
     // MARK: - Helper Functions
@@ -768,8 +971,8 @@ class ScreenDetector {
     }
     
     private static func getAspectRatioScore(_ aspectRatio: Double) -> Double {
-        // Common screen aspect ratios: 16:9, 4:3, 16:10, 21:9
-        let commonRatios = [16.0/9.0, 4.0/3.0, 16.0/10.0, 21.0/9.0]
+        // Common screen aspect ratios: 16:9, 4:3, 16:10, 21:9, 32:9 (ultrawide)
+        let commonRatios = [16.0/9.0, 4.0/3.0, 16.0/10.0, 21.0/9.0, 32.0/9.0]
         
         var bestScore: Double = 0
         for ratio in commonRatios {
@@ -778,6 +981,107 @@ class ScreenDetector {
         }
         
         return bestScore
+    }
+    
+    private static func calculateDisplayAspectRatio(_ quad: VNRectangleObservation, imageSize: CGSize) -> Double {
+        // Convert normalized coordinates to pixel coordinates
+        let corners = [
+            CGPoint(x: quad.topLeft.x * imageSize.width, y: (1 - quad.topLeft.y) * imageSize.height),
+            CGPoint(x: quad.topRight.x * imageSize.width, y: (1 - quad.topRight.y) * imageSize.height),
+            CGPoint(x: quad.bottomRight.x * imageSize.width, y: (1 - quad.bottomRight.y) * imageSize.height),
+            CGPoint(x: quad.bottomLeft.x * imageSize.width, y: (1 - quad.bottomLeft.y) * imageSize.height)
+        ]
+        
+        let width1 = distance(corners[0], corners[1])
+        let width2 = distance(corners[2], corners[3])
+        let height1 = distance(corners[0], corners[3])
+        let height2 = distance(corners[1], corners[2])
+        
+        let avgWidth = (width1 + width2) / 2
+        let avgHeight = (height1 + height2) / 2
+        
+        return avgWidth / avgHeight
+    }
+    
+    private static func isValidDisplayRectangle(_ quad: VNRectangleObservation, imageSize: CGSize, verbose: Bool) -> Bool {
+        let aspectRatio = calculateDisplayAspectRatio(quad, imageSize: imageSize)
+        
+        // Check if aspect ratio is within reasonable display bounds
+        let isValidAspectRatio = aspectRatio >= 1.0 && aspectRatio <= 4.0  // Covers 4:3 to 32:9
+        
+        // Check if rectangle is large enough to be a display
+        let corners = [
+            CGPoint(x: quad.topLeft.x * imageSize.width, y: (1 - quad.topLeft.y) * imageSize.height),
+            CGPoint(x: quad.topRight.x * imageSize.width, y: (1 - quad.topRight.y) * imageSize.height),
+            CGPoint(x: quad.bottomRight.x * imageSize.width, y: (1 - quad.bottomRight.y) * imageSize.height),
+            CGPoint(x: quad.bottomLeft.x * imageSize.width, y: (1 - quad.bottomLeft.y) * imageSize.height)
+        ]
+        
+        let area = calculatePolygonArea(corners)
+        let imageArea = imageSize.width * imageSize.height
+        let areaRatio = area / Double(imageArea)
+        
+        let isLargeEnough = areaRatio >= 0.15  // Display should occupy at least 15% of photo
+        
+        // Check rectangularity (should be close to perfect rectangle)
+        let rectangularity = calculateRectangularity(corners)
+        let isRectangular = rectangularity >= 0.7  // Should be reasonably rectangular
+        
+        let isValid = isValidAspectRatio && isLargeEnough && isRectangular
+        
+        if verbose {
+            print("Display validation: aspect=\(String(format: "%.2f", aspectRatio)) (\(isValidAspectRatio ? "✓" : "✗")), area=\(String(format: "%.1f%%", areaRatio * 100)) (\(isLargeEnough ? "✓" : "✗")), rect=\(String(format: "%.3f", rectangularity)) (\(isRectangular ? "✓" : "✗"))")
+        }
+        
+        return isValid
+    }
+    
+    private static func findBestDisplayRectangle(_ rectangles: [VNRectangleObservation], imageSize: CGSize, verbose: Bool) -> VNRectangleObservation? {
+        var bestRectangle: VNRectangleObservation?
+        var bestScore: Double = 0
+        
+        for (index, rectangle) in rectangles.enumerated() {
+            // Validate this looks like a display
+            if !isValidDisplayRectangle(rectangle, imageSize: imageSize, verbose: false) {
+                if verbose { print("Rectangle \(index) failed display validation") }
+                continue
+            }
+            
+            let aspectRatio = calculateDisplayAspectRatio(rectangle, imageSize: imageSize)
+            let corners = [
+                CGPoint(x: rectangle.topLeft.x * imageSize.width, y: (1 - rectangle.topLeft.y) * imageSize.height),
+                CGPoint(x: rectangle.topRight.x * imageSize.width, y: (1 - rectangle.topRight.y) * imageSize.height),
+                CGPoint(x: rectangle.bottomRight.x * imageSize.width, y: (1 - rectangle.bottomRight.y) * imageSize.height),
+                CGPoint(x: rectangle.bottomLeft.x * imageSize.width, y: (1 - rectangle.bottomLeft.y) * imageSize.height)
+            ]
+            
+            let area = calculatePolygonArea(corners)
+            let rectangularity = calculateRectangularity(corners)
+            
+            // Scoring for display detection (prioritize area, aspect ratio, and rectangularity)
+            let areaScore = area / (imageSize.width * imageSize.height)
+            let aspectScore = getAspectRatioScore(aspectRatio)
+            let rectangularityScore = Double(rectangularity)
+            let confidenceScore = Double(rectangle.confidence)
+            
+            // Weighted scoring optimized for display detection
+            let totalScore = areaScore * 0.4 + aspectScore * 0.3 + rectangularityScore * 0.2 + confidenceScore * 0.1
+            
+            if verbose {
+                print("Display rectangle \(index): area=\(String(format: "%.3f", areaScore)), aspect=\(String(format: "%.2f", aspectRatio)) (score=\(String(format: "%.3f", aspectScore))), rect=\(String(format: "%.3f", rectangularityScore)), conf=\(String(format: "%.3f", confidenceScore)), total=\(String(format: "%.3f", totalScore))")
+            }
+            
+            if totalScore > bestScore {
+                bestScore = totalScore
+                bestRectangle = rectangle
+            }
+        }
+        
+        if verbose && bestRectangle != nil {
+            print("Best display rectangle score: \(String(format: "%.3f", bestScore))")
+        }
+        
+        return bestScore > 0.3 ? bestRectangle : nil  // Higher threshold for display detection
     }
     
     private static func distance(_ p1: CGPoint, _ p2: CGPoint) -> Double {
