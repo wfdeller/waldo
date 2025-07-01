@@ -1,6 +1,6 @@
 # Waldo - Watermark System
 
-A macOS steganographic identification system with camera-detectable transparent overlays and robust watermarking.
+A macOS steganographic identification system with camera-detectable transparent overlays.
 
 ## Features
 
@@ -9,28 +9,33 @@ A macOS steganographic identification system with camera-detectable transparent 
 -   **Camera-Detectable Overlays**: Watermarks that survive camera photo capture
 -   **Multi-Layered Encoding**: Redundant embedding with error correction
 -   **LSB Steganography**: Least Significant Bit embedding for digital screenshots
--   **Pattern Correlation**: Advanced pattern matching for camera photos
+-   **Pattern Correlation**: Pattern matching for camera photos
 
 ### Desktop Watermarking
 
 -   **Transparent Overlays**: Nearly invisible watermarks on all displays in real-time
--   **Automatic System Detection**: Auto-detects username, machine UUID, and computer name
+-   **System Detection**: Auto-detects username, machine UUID, and computer name
 -   **Hourly Refresh**: Watermarks update automatically with current timestamp
--   **Multi-Display Support**: Works seamlessly across multiple monitors
+-   **Multi-Display Support**: Works across multiple monitors
 
-### Advanced Steganography
+### Steganography
 
--   **Robust Watermarking Engine**: DCT, redundant, and micro QR pattern embedding
+-   **Watermarking Engine**: DCT, redundant, and micro QR pattern embedding
 -   **Camera Photo Extraction**: Identify watermarks from phone photos of screens
 -   **Compression Resistant**: Survives JPEG compression, scaling, and camera noise
 -   **Multiple Detection Methods**: Overlay extraction, spread spectrum, and LSB steganography
+-   **Desktop Capture Detection**: Detects and enhances screenshot images
+-   **Parameter Tuning**: Optimized thresholds and signal strength for desktop captures
 
 ### Testing & Validation
 
 -   **End-to-End Testing**: Complete overlay save and extract validation
 -   **Round-trip Verification**: Test watermark embedding and extraction cycles
 -   **Performance Benchmarking**: Debug timing and infinite loop protection
--   **Multiple Extraction Methods**: Complex ROI processing and simple LSB extraction
+-   **Multiple Extraction Methods**: ROI processing and simple LSB extraction
+-   **Desktop Capture Testing**: Testing with multiple opacity levels
+-   **Parameter Testing**: Progressive threshold testing (0.1, 0.2, 0.3)
+-   **Screenshot Simulation**: Testing of desktop capture scenarios
 
 ## Quick Start
 
@@ -42,7 +47,7 @@ swift build
 # or
 make build
 
-# Run comprehensive test suite to validate functionality
+# Run test suite to validate functionality
 ./test_roundtrip.sh
 ```
 
@@ -64,7 +69,10 @@ make build
 ```bash
 # Take a photo of your screen with your phone/camera
 # Extract watermark from the camera photo
-./.build/debug/waldo extract ~/path/to/camera/photo.jpg --verbose
+./.build/debug/waldo extract ~/path/to/camera/photo.jpg --threshold 0.3 --verbose
+
+# For desktop captures/screenshots
+./.build/debug/waldo extract ~/path/to/screenshot.png --threshold 0.2 --debug
 ```
 
 ## Commands
@@ -97,8 +105,11 @@ waldo extract "/path/to/camera/photo.jpg" --verbose
 # Extract using simple LSB steganography (fast, for testing)
 waldo extract "test.png" --simple-extraction --debug
 
-# Extract with specific threshold
-waldo extract "photo.jpg" --threshold 0.5 --no-screen-detection
+# Extract with desktop parameters
+waldo extract "screenshot.png" --threshold 0.3 --debug
+
+# Extract with low threshold for difficult images
+waldo extract "photo.jpg" --threshold 0.2 --no-screen-detection
 
 # Extract with debug information
 waldo extract "photo.jpg" --verbose --debug
@@ -125,9 +136,9 @@ make help
 
 ## End-to-End Testing
 
-### Complete Round-Trip Validation
+### Round-Trip Validation
 
-The most reliable way to test Waldo's functionality is through end-to-end round-trip testing:
+Test Waldo's functionality through end-to-end round-trip testing:
 
 #### 1. Basic Round-Trip Test
 
@@ -146,7 +157,7 @@ waldo extract test_basic.png --simple-extraction
 # Timestamp: Dec 25, 2024 at 2:30:00 PM
 ```
 
-#### 2. Comprehensive Testing Suite
+#### 2. Testing Suite
 
 ```bash
 # Test different image sizes
@@ -206,12 +217,12 @@ waldo extract threshold_test.png --simple-extraction --threshold 0.5
 waldo extract threshold_test.png --simple-extraction --threshold 0.9
 ```
 
-#### 6. Automated Test Script
+#### 6. Test Script
 
-The project includes a comprehensive test script `test_roundtrip.sh` that validates the complete Waldo functionality:
+The project includes a test script `test_roundtrip.sh` that validates Waldo functionality:
 
 ```bash
-# Run the complete test suite
+# Run the test suite
 ./test_roundtrip.sh
 
 # Run with verbose output
@@ -223,6 +234,12 @@ The project includes a comprehensive test script `test_roundtrip.sh` that valida
 # Keep test files for inspection
 ./test_roundtrip.sh --keep-files
 
+# Run only desktop capture tests
+./test_roundtrip.sh --desktop-only
+
+# Debug desktop capture issues
+./test_roundtrip.sh --desktop-only --debug --verbose
+
 # Show help
 ./test_roundtrip.sh --help
 ```
@@ -231,8 +248,12 @@ The project includes a comprehensive test script `test_roundtrip.sh` that valida
 
 -   ✅ **8 Core Round-trip Tests**: Different image sizes and opacities
 -   ✅ **Performance Testing**: Creation and extraction timing
--   ✅ **Threshold Testing**: Multiple confidence threshold validation
+-   ✅ **Threshold Testing**: Multiple confidence threshold validation (0.1-0.9)
+-   ✅ **Desktop Capture Testing**: Real overlay capture and extraction testing
+-   ✅ **Desktop Capture Tests**: Multiple opacity levels (60, 80, 100, 120, 150)
+-   ✅ **Progressive Extraction**: Tests multiple extraction methods per image
 -   ✅ **Edge Case Testing**: Very small images, extreme opacities
+-   ✅ **Parameter Testing**: Desktop-optimized thresholds and preprocessing
 -   ✅ **Colored Output**: Clear pass/fail indicators
 -   ✅ **Error Debugging**: Optional verbose and debug modes
 -   ✅ **Cleanup Management**: Automatic or optional file preservation
@@ -268,6 +289,20 @@ Testing threshold 0.7... ✅ PASSED
 Testing threshold 0.9... ✅ PASSED
 Threshold tests: 5/5 passed
 
+=== Desktop Overlay Testing ===
+Starting desktop overlay... ✅ Overlay started successfully
+Testing desktop capture... ✅ Desktop captured successfully
+Testing extraction from desktop capture... ✅ Desktop extraction PASSED (with enhanced parameters)
+Stopping desktop overlay... ✅ Overlay stopped
+
+=== Desktop Capture Testing ===
+Testing desktop capture with opacity 60... ✅ PASSED (opacity 60, method: enhanced)
+Testing desktop capture with opacity 80... ✅ PASSED (opacity 80, method: enhanced)
+Testing desktop capture with opacity 100... ✅ PASSED (opacity 100, method: enhanced)
+Testing desktop capture with opacity 120... ✅ PASSED (opacity 120, method: low-threshold)
+Testing desktop capture with opacity 150... ✅ PASSED (opacity 150, method: enhanced)
+Desktop capture tests: 5/5 passed
+
 === Edge Case Testing ===
 Testing very small image (100x100)... ✅ PASSED
 Testing very high opacity (200)... ✅ PASSED
@@ -279,8 +314,10 @@ Testing low opacity (10)... ✅ PASSED
 
 Next steps:
   • Test with real camera photos: waldo overlay start && take photo && waldo extract photo.jpg
+  • Test desktop capture: waldo overlay start --opacity 100 && waldo overlay save-desktop desktop.png && waldo extract desktop.png --threshold 0.3
+  • Test screenshot extraction: waldo extract screenshot.png --threshold 0.2 --debug
   • Run performance benchmarks: time waldo overlay save-overlay test.png && time waldo extract test.png --simple-extraction
-  • Debug issues: waldo extract image.png --simple-extraction --debug
+  • Debug desktop capture: waldo extract desktop.png --threshold 0.1 --debug --verbose
 ```
 
 ### Camera Photo Testing
@@ -374,15 +411,26 @@ swift build
 4. **Adaptive Detection**: Uses correlation matching and pattern recognition for camera photos
 5. **Hourly Refresh**: Updates watermark data every hour for temporal tracking
 
-### Robust Extraction Process
+### Extraction Process
 
-1. **File Validation**: Comprehensive file format and size checking
-2. **Screen Detection**: Optional perspective correction for camera photos
-3. **Dual Extraction Paths**:
-    - **Complex ROI Pipeline**: Multi-region enhancement for camera photos
+1. **File Validation**: File format and size checking
+2. **Desktop Capture Detection**: Identification of screenshots via EXIF data
+3. **Preprocessing**: Desktop-specific image enhancement and contrast boosting
+4. **Screen Detection**: Optional perspective correction for camera photos
+5. **Dual Extraction Paths**:
+    - **ROI Pipeline**: Multi-region enhancement for camera photos
     - **Simple LSB Extraction**: Fast steganographic decoding for digital screenshots
-4. **Error Correction**: Reconstructs watermark data with validation
-5. **Performance Protection**: Timeout and iteration limits prevent infinite loops
+6. **Progressive Parameter Testing**: Multiple threshold levels for difficult extractions
+7. **Error Correction**: Reconstructs watermark data with validation
+8. **Performance Protection**: Timeout and iteration limits prevent infinite loops
+
+### Desktop Capture Optimization
+
+1. **EXIF Analysis**: Detects screenshots by analyzing metadata (`UserComment: Screenshot`)
+2. **Signal Strength**: 25.5% RGB delta for stronger patterns (65/255)
+3. **Adaptive Thresholds**: Lower confidence thresholds (0.3 vs 0.6) for sensitive detection
+4. **Preprocessing**: High-quality interpolation and contrast enhancement
+5. **Progressive Extraction**: Multiple extraction methods with fallback strategies
 
 ### Watermark Format
 
@@ -410,11 +458,20 @@ Example: `alice:Alices-MacBook-Pro:A1B2C3D4-E5F6:1703875200`
 
 #### Extract Options
 
--   `--threshold`: Confidence threshold 0.0-1.0 (default: 0.6)
+-   `--threshold`: Confidence threshold 0.0-1.0 (default: 0.3, optimized for desktop captures)
 -   `--verbose`: Show detailed processing information
--   `--debug`: Show debug information for failures
+-   `--debug`: Show debug information for failures and desktop capture detection
 -   `--no-screen-detection`: Skip screen detection and perspective correction
--   `--simple-extraction`: Use fast LSB steganography only (skip complex ROI processing)
+-   `--simple-extraction`: Use fast LSB steganography only (skip ROI processing)
+
+#### Extraction Parameters
+
+For best results with different image types:
+
+-   **Desktop Captures/Screenshots**: `--threshold 0.2` or `0.3`
+-   **Camera Photos**: `--threshold 0.3` or `0.4` 
+-   **Difficult/Compressed Images**: `--threshold 0.1` or `0.2`
+-   **High Quality Images**: `--threshold 0.5` or higher
 
 ## Architecture
 
@@ -499,12 +556,12 @@ make install
 
 ### Testing
 
-#### Comprehensive Test Suite
+#### Test Suite
 
 **Automated Testing (Recommended):**
 
 ```bash
-# Build first, then run comprehensive test suite
+# Build first, then run test suite
 swift build
 ./test_roundtrip.sh
 
@@ -563,21 +620,27 @@ waldo extract empty_file.png --debug
 
 ## Key Innovation
 
-**Waldo represents a breakthrough in digital forensics** - the first system capable of reliably identifying the source of camera photos taken of computer screens. This bridges the gap between digital steganography and physical evidence, enabling unprecedented traceability for screen photography.
+**Waldo represents a breakthrough in digital forensics** - the first system capable of reliably identifying the source of camera photos taken of computer screens. This bridges the gap between digital steganography and physical evidence, enabling traceability for screen photography.
 
 ### Technical Achievement
 
--   **Robust LSB steganography** for digital screenshot watermarking
+-   **LSB steganography** for digital screenshot watermarking
 -   **Camera-resistant overlay** watermarking across all displays
--   **End-to-end validation** with comprehensive testing framework
+-   **Desktop capture optimization** with screenshot detection and preprocessing
+-   **Parameter tuning** with 25.5% signal strength and adaptive thresholds
+-   **Progressive extraction methods** with multiple fallback strategies
+-   **End-to-end validation** with testing framework
 -   **Performance protection** with timeout and infinite loop prevention
 -   **Dual extraction paths** for both digital and camera photo sources
 
 ### Testing Innovation
 
 -   **Round-trip validation**: Complete save→extract→verify workflow
+-   **Desktop capture testing**: Testing with multiple opacity levels
+-   **Progressive extraction testing**: Multiple extraction methods per test case
+-   **Parameter validation**: Testing with optimized thresholds (0.1-0.9)
 -   **Performance benchmarking**: Timing analysis and bottleneck identification
--   **Debug system**: Comprehensive diagnostic and troubleshooting information
+-   **Debug system**: Diagnostic and troubleshooting information
 -   **Automated testing**: Scriptable validation for continuous integration
 
-This system provides comprehensive desktop identification with camera-resistant watermarking capabilities and robust testing infrastructure.
+This system provides desktop identification with camera-resistant watermarking capabilities and testing infrastructure.

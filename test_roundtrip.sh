@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Waldo Round-trip Validation Test Suite
-# Tests the complete save-overlay -> extract and save-desktop -> extract cycles to validate functionality
-# Includes enhanced desktop capture testing with optimized parameters for screenshot detection
+# Tests save-overlay -> extract and save-desktop -> extract cycles to validate functionality
+# Includes desktop capture testing with optimized parameters for screenshot detection
 
 set -e  # Exit on any error
 
@@ -298,7 +298,7 @@ run_desktop_overlay_tests() {
                 if [[ $wait_count -ge 3 ]]; then
                     # Try to detect overlay by checking for waldo processes
                     if pgrep -f "waldo overlay start" >/dev/null 2>&1; then
-                        print_success "Overlay started successfully"
+                        print_success "Overlay started"
                         break
                     fi
                 fi
@@ -322,29 +322,29 @@ run_desktop_overlay_tests() {
     # Test desktop capture
     echo -n "Testing desktop capture... "
     
-    # Give overlay a moment to fully initialize
+    # Give overlay a moment to initialize
     sleep 2
     
     if $WALDO_BINARY overlay save-desktop "$desktop_file" $WALDO_FLAGS >/dev/null 2>&1; then
-        print_success "Desktop captured successfully"
+        print_success "Desktop captured"
         
-        # Test extraction from desktop capture with enhanced parameters
+        # Test extraction from desktop capture with optimized parameters
         echo -n "Testing extraction from desktop capture... "
         
         # Try extraction with desktop-optimized parameters
         if $WALDO_BINARY extract "$desktop_file" --threshold 0.3 --debug $WALDO_FLAGS >/dev/null 2>&1; then
-            print_success "Desktop extraction PASSED (with enhanced parameters)"
+            print_success "Desktop extraction PASSED (with optimized parameters)"
         elif $WALDO_BINARY extract "$desktop_file" --threshold 0.2 --no-screen-detection $WALDO_FLAGS >/dev/null 2>&1; then
             print_success "Desktop extraction PASSED (with low threshold)"
         elif $WALDO_BINARY extract "$desktop_file" --simple-extraction --no-screen-detection $WALDO_FLAGS >/dev/null 2>&1; then
             print_success "Desktop extraction PASSED (simple extraction)"
         else
-            print_warning "Desktop extraction FAILED (now testing with enhanced methods)"
-            # Try with various enhanced parameters
+            print_warning "Desktop extraction FAILED (now testing with additional methods)"
+            # Try with various additional parameters
             if $WALDO_BINARY extract "$desktop_file" --threshold 0.1 $WALDO_FLAGS >/dev/null 2>&1; then
                 print_success "Desktop extraction PASSED (ultra-low threshold)"
             else
-                print_failure "Desktop extraction FAILED (even with enhanced parameters)"
+                print_failure "Desktop extraction FAILED (even with additional parameters)"
                 if [[ "$DEBUG" == "true" ]]; then
                     echo "Debug: Trying desktop extraction with full debug output:"
                     $WALDO_BINARY extract "$desktop_file" --threshold 0.3 --debug $WALDO_FLAGS 2>&1 | head -10
@@ -381,9 +381,9 @@ run_desktop_overlay_tests() {
     fi
 }
 
-# Function to run comprehensive desktop capture tests
-run_comprehensive_desktop_tests() {
-    print_header "Comprehensive Desktop Capture Testing"
+# Function to run desktop capture tests
+run_desktop_capture_tests() {
+    print_header "Desktop Capture Testing"
     
     local test_passed=0
     local test_total=0
@@ -402,18 +402,38 @@ run_comprehensive_desktop_tests() {
         
         # Start overlay with specific opacity
         if $WALDO_BINARY overlay start --daemon --opacity "$opacity" $WALDO_FLAGS >/dev/null 2>&1; then
-            # Wait for overlay to initialize
-            sleep 3
+            # Wait for overlay to initialize with timeout
+            local init_count=0
+            local max_init_wait=10
+            local overlay_ready=false
+            
+            while [[ $init_count -lt $max_init_wait ]]; do
+                if $WALDO_BINARY overlay status >/dev/null 2>&1; then
+                    local status_output=$($WALDO_BINARY overlay status 2>/dev/null)
+                    if echo "$status_output" | grep -q "Active: Yes"; then
+                        overlay_ready=true
+                        break
+                    fi
+                fi
+                sleep 1
+                init_count=$((init_count + 1))
+            done
+            
+            if [[ "$overlay_ready" == "false" ]]; then
+                print_failure "FAILED (overlay init timeout for opacity $opacity)"
+                $WALDO_BINARY overlay stop >/dev/null 2>&1 || true
+                continue
+            fi
             
             # Capture desktop
             if $WALDO_BINARY overlay save-desktop "$desktop_file" $WALDO_FLAGS >/dev/null 2>&1; then
                 # Test extraction with progressive methods
                 local extraction_success=false
                 
-                # Method 1: Enhanced desktop extraction
+                # Method 1: Desktop extraction
                 if $WALDO_BINARY extract "$desktop_file" --threshold 0.3 $WALDO_FLAGS >/dev/null 2>&1; then
                     extraction_success=true
-                    method="enhanced"
+                    method="optimized"
                 # Method 2: Low threshold
                 elif $WALDO_BINARY extract "$desktop_file" --threshold 0.2 --no-screen-detection $WALDO_FLAGS >/dev/null 2>&1; then
                     extraction_success=true
@@ -449,11 +469,11 @@ run_comprehensive_desktop_tests() {
             rm -f "$desktop_file"
         fi
         
-        # Brief pause between tests
-        sleep 1
+        # Brief pause between tests to allow cleanup
+        sleep 3
     done
     
-    print_status "$BLUE" "Desktop capture comprehensive tests: $test_passed/$test_total passed"
+    print_status "$BLUE" "Desktop capture tests: $test_passed/$test_total passed"
     
     # Test screenshot simulation (create overlay image and test as if it's a screenshot)
     print_status "$BLUE" "Testing screenshot simulation..."
@@ -463,7 +483,7 @@ run_comprehensive_desktop_tests() {
     # Create an overlay image
     if $WALDO_BINARY overlay save-overlay "$screenshot_file" --width 1200 --height 800 --opacity 100 >/dev/null 2>&1; then
         # Simulate screenshot EXIF data by creating a copy with modified metadata
-        # Note: This is a simplified simulation - real screenshots have complex metadata
+        # Note: This is a simplified simulation - real screenshots have different metadata
         echo -n "Testing screenshot simulation extraction... "
         
         # Test extraction as if it's a desktop capture
@@ -555,7 +575,7 @@ main() {
         
         # Run only desktop-related tests
         run_desktop_overlay_tests
-        run_comprehensive_desktop_tests
+        run_desktop_capture_tests
     else
         print_header "Core Round-trip Tests"
         
@@ -573,7 +593,7 @@ main() {
         run_performance_test
         run_threshold_tests
         run_desktop_overlay_tests
-        run_comprehensive_desktop_tests
+        run_desktop_capture_tests
         run_edge_case_tests
     fi
     
@@ -603,7 +623,7 @@ main() {
         echo
         print_status "$BLUE" "Next steps:"
         echo "  • Test with real camera photos: waldo overlay start && take photo && waldo extract photo.jpg"
-        echo "  • Test desktop capture with enhanced parameters: waldo overlay start --opacity 100 && waldo overlay save-desktop desktop.png && waldo extract desktop.png --threshold 0.3"
+        echo "  • Test desktop capture with optimized parameters: waldo overlay start --opacity 100 && waldo overlay save-desktop desktop.png && waldo extract desktop.png --threshold 0.3"
         echo "  • Test screenshot extraction: waldo extract screenshot.png --threshold 0.2 --debug"
         echo "  • Run performance benchmarks: time waldo overlay save-overlay test.png && time waldo extract test.png --simple-extraction"
         echo "  • Debug desktop capture issues: waldo extract desktop.png --threshold 0.1 --debug --verbose"
