@@ -1,5 +1,5 @@
 public struct Version {
-    public static let current = "2.3.0"
+    public static let current = "3.0.0"
 }
 
 ///
@@ -11,4 +11,5 @@ public struct Version {
 /// 2.1.0 - a lot of QR updates 
 /// 2.2.0 - enhancements to attempt to recognize desktop screenshots
 /// 2.3.0 - added overlay_sample option
+/// 3.0.0 - project structure cleanup and addition of --luminous flag 
 /// 

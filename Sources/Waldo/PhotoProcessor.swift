@@ -3,405 +3,280 @@ import Foundation
 import UniformTypeIdentifiers
 import ImageIO
 
+enum PhotoProcessorError: Error, CustomStringConvertible {
+    case fileNotFound(URL)
+    case fileEmpty(URL)
+    case fileTooLarge(URL, Int64)
+    case unknownFileType(URL)
+    case notAnImage(URL, String)
+    case imageSourceCreationFailed(URL)
+    case imageCreationFailed(URL)
+    case dataEmpty
+    case dataTooLarge(Int)
+    case imageSourceCreationFailedFromData
+    case imageCreationFailedFromData
+    case failedToLoadImage(String)
+
+    var description: String {
+        switch self {
+        case .fileNotFound(let url):
+            return "File not found at: \(url.path)"
+        case .fileEmpty(let url):
+            return "File is empty at: \(url.path)"
+        case .fileTooLarge(let url, let size):
+            return "File at \(url.path) is too large: \(size) bytes (limit: 100MB)"
+        case .unknownFileType(let url):
+            return "Unknown file type for extension: \(url.pathExtension)"
+        case .notAnImage(let url, let type):
+            return "File at \(url.path) is not a valid image type: \(type)"
+        case .imageSourceCreationFailed(let url):
+            return "Failed to create image source from URL: \(url.path)"
+        case .imageCreationFailed(let url):
+            return "Failed to create CGImage from source: \(url.path)"
+        case .dataEmpty:
+            return "Input data is empty."
+        case .dataTooLarge(let size):
+            return "Input data is too large: \(size) bytes (limit: 100MB)"
+        case .imageSourceCreationFailedFromData:
+            return "Failed to create image source from data."
+        case .imageCreationFailedFromData:
+            return "Failed to create CGImage from data source."
+        case .failedToLoadImage(let reason):
+            return "Failed to load image: \(reason)"
+        }
+    }
+}
+
 class PhotoProcessor {
-    
-    static func loadImage(from url: URL, logger: Logger = Logger()) -> CGImage? {
+
+    static func loadImage(from url: URL, logger: Logger = Logger()) throws -> CGImage {
         let startTime = CFAbsoluteTimeGetCurrent()
-        
         logger.debug("Attempting to load image from: \(url.path)")
-        
-        // Check file existence and permissions
-        let fileManager = FileManager.default
-        guard fileManager.fileExists(atPath: url.path) else {
-            logger.debug("File does not exist: \(url.path)")
-            return nil
-        }
-        
-        // Check file size
-        do {
-            let attributes = try fileManager.attributesOfItem(atPath: url.path)
-            if let fileSize = attributes[.size] as? Int64 {
-                logger.debug("File size: \(fileSize) bytes")
-                if fileSize == 0 {
-                    logger.debug("File is empty")
-                    return nil
-                }
-                if fileSize > 100_000_000 { // 100MB limit
-                    logger.debug("File too large: \(fileSize) bytes (limit: 100MB)")
-                }
-            }
-        } catch {
-            logger.debug("Failed to read file attributes: \(error.localizedDescription)")
-        }
-        
-        // Validate file type
-        guard let fileType = UTType(filenameExtension: url.pathExtension) else {
-            logger.debug("Unknown file extension: \(url.pathExtension)")
-            return nil
-        }
-        
-        guard fileType.conforms(to: .image) else {
-            logger.debug("File is not an image type: \(fileType.identifier)")
-            return nil
-        }
-        
-        logger.debug("File type validated: \(fileType.identifier)")
-        
-        // Create image source
+
+        try validateFile(at: url, logger: logger)
+
         guard let imageSource = CGImageSourceCreateWithURL(url as CFURL, nil) else {
-            logger.debug("Failed to create CGImageSource from URL")
-            return nil
+            throw PhotoProcessorError.imageSourceCreationFailed(url)
         }
-        
-        // Get image properties
-        if let properties = CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [String: Any] {
-            logger.debug("Image properties: \(properties)")
-            
-            if let pixelWidth = properties[kCGImagePropertyPixelWidth as String] as? Int,
-               let pixelHeight = properties[kCGImagePropertyPixelHeight as String] as? Int {
-                logger.debug("Image dimensions: \(pixelWidth)x\(pixelHeight)")
-            }
-            
-            if let colorModel = properties[kCGImagePropertyColorModel as String] as? String {
-                logger.debug("Color model: \(colorModel)")
-            }
-            
-            if let hasAlpha = properties[kCGImagePropertyHasAlpha as String] as? Bool {
-                logger.debug("Has alpha channel: \(hasAlpha)")
-            }
-        }
-        
-        // Create the image
+
+        logImageProperties(from: imageSource, logger: logger)
+
         guard let image = CGImageSourceCreateImageAtIndex(imageSource, 0, nil) else {
-            logger.debug("Failed to create CGImage from source")
-            return nil
+            throw PhotoProcessorError.imageCreationFailed(url)
         }
-        
-        let loadTime = CFAbsoluteTimeGetCurrent() - startTime
-        logger.timing("Image loading", duration: loadTime)
+
+        logger.timing("Image loading", duration: CFAbsoluteTimeGetCurrent() - startTime)
         logger.debug("Successfully loaded image: \(image.width)x\(image.height)")
-        
         return image
     }
-    
-    static func loadImage(from data: Data, logger: Logger = Logger()) -> CGImage? {
+
+    static func loadImage(from data: Data, logger: Logger = Logger()) throws -> CGImage {
         let startTime = CFAbsoluteTimeGetCurrent()
-        
         logger.debug("Attempting to load image from data (\(data.count) bytes)")
-        
-        guard !data.isEmpty else {
-            logger.debug("Data is empty")
-            return nil
-        }
-        
-        if data.count > 100_000_000 { // 100MB limit
-            logger.debug("Data too large: \(data.count) bytes (limit: 100MB)")
-        }
-        
+
+        guard !data.isEmpty else { throw PhotoProcessorError.dataEmpty }
+        if data.count > 100_000_000 { logger.debug("Data too large: \(data.count) bytes (limit: 100MB)") }
+
         guard let imageSource = CGImageSourceCreateWithData(data as CFData, nil) else {
-            logger.debug("Failed to create CGImageSource from data")
-            return nil
+            throw PhotoProcessorError.imageSourceCreationFailedFromData
         }
-        
-        // Get image properties
-        if let properties = CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [String: Any] {
-            logger.debug("Image properties from data: \(properties)")
-            
-            if let pixelWidth = properties[kCGImagePropertyPixelWidth as String] as? Int,
-               let pixelHeight = properties[kCGImagePropertyPixelHeight as String] as? Int {
-                logger.debug("Image dimensions from data: \(pixelWidth)x\(pixelHeight)")
-            }
-        }
-        
+
+        logImageProperties(from: imageSource, logger: logger, fromData: true)
+
         guard let image = CGImageSourceCreateImageAtIndex(imageSource, 0, nil) else {
-            logger.debug("Failed to create CGImage from data source")
-            return nil
+            throw PhotoProcessorError.imageCreationFailedFromData
         }
-        
-        let loadTime = CFAbsoluteTimeGetCurrent() - startTime
-        logger.timing("Image loading from data", duration: loadTime)
+
+        logger.timing("Image loading from data", duration: CFAbsoluteTimeGetCurrent() - startTime)
         logger.debug("Successfully loaded image from data: \(image.width)x\(image.height)")
-        
         return image
     }
-    
+
     static func extractWatermarkFromPhoto(at url: URL, threshold: Double = WatermarkConstants.PHOTO_CONFIDENCE_THRESHOLD, verbose: Bool = false, debug: Bool = false, enableScreenDetection: Bool = true, simpleExtraction: Bool = false) -> (userID: String, watermark: String, timestamp: TimeInterval)? {
         let logger = Logger(verbose: verbose, debug: debug)
-        
-        // Load image and get properties for desktop capture detection
-        let imageSource = CGImageSourceCreateWithURL(url as CFURL, nil)
-        var imageProperties: [String: Any] = [:]
-        
-        if let source = imageSource {
-            if let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any] {
-                imageProperties = properties
-            }
-        }
-        
-        guard let image = loadImage(from: url, logger: logger) else {
-            logger.error("Failed to load image from: \(url)")
+        do {
+            let image = try loadImage(from: url, logger: logger)
+            let imageProperties = getImageProperties(from: url) ?? [:]
+            return extractWatermark(from: image, imageProperties: imageProperties, threshold: threshold, verbose: verbose, debug: debug, enableScreenDetection: enableScreenDetection, simpleExtraction: simpleExtraction)
+        } catch {
+            logger.error("Failed to load image from \(url.path): \(error)")
             return nil
         }
-        
-        // Detect if this is a desktop capture
-        let isDesktopCapture = PhotoProcessor.isDesktopCapture(properties: imageProperties)
-        
+    }
+
+    static func extractWatermarkFromPhotoData(_ data: Data, threshold: Double = WatermarkConstants.PHOTO_CONFIDENCE_THRESHOLD, verbose: Bool = false, debug: Bool = false, enableScreenDetection: Bool = true, simpleExtraction: Bool = false) -> (userID: String, watermark: String, timestamp: TimeInterval)? {
+        let logger = Logger(verbose: verbose, debug: debug)
+        do {
+            let image = try loadImage(from: data, logger: logger)
+            let imageProperties = getImageProperties(from: data) ?? [:]
+            return extractWatermark(from: image, imageProperties: imageProperties, threshold: threshold, verbose: verbose, debug: debug, enableScreenDetection: enableScreenDetection, simpleExtraction: simpleExtraction)
+        } catch {
+            logger.error("Failed to load image from data: \(error)")
+            return nil
+        }
+    }
+
+    private static func extractWatermark(from image: CGImage, imageProperties: [String: Any], threshold: Double, verbose: Bool, debug: Bool, enableScreenDetection: Bool, simpleExtraction: Bool) -> (userID: String, watermark: String, timestamp: TimeInterval)? {
+        let logger = Logger(verbose: verbose, debug: debug)
+        let isDesktopCapture = isDesktopCapture(properties: imageProperties)
+
         if verbose {
             print("Original image size: \(image.width)x\(image.height)")
-            if isDesktopCapture {
-                print("Desktop capture detected - applying enhanced preprocessing")
-            }
+            if isDesktopCapture { print("Desktop capture detected - applying enhanced preprocessing") }
         }
-        
-        // Try screen detection and perspective correction first
+
         var processedImage = image
         if enableScreenDetection {
-            if let correctedImage = ScreenDetector.detectAndCorrectScreen(from: image, verbose: verbose) {
-                if verbose {
-                    print("Screen detected and corrected, new size: \(correctedImage.width)x\(correctedImage.height)")
-                }
-                processedImage = correctedImage
-            } else {
-                if verbose {
-                    print("No screen detected, proceeding with original image")
-                }
-            }
-        } else {
-            if verbose {
-                print("Screen detection disabled, proceeding with original image")
-            }
+            processedImage = detectAndCorrectScreen(from: image, verbose: verbose) ?? image
         }
-        
-        // Apply desktop capture preprocessing if needed
+
         if isDesktopCapture {
-            if let enhancedImage = preprocessImageForExtraction(processedImage, isDesktopCapture: true, debug: debug) {
-                processedImage = enhancedImage
-                if debug {
-                    print("Debug: Desktop capture preprocessing completed")
-                }
-            }
+            processedImage = preprocessImageForExtraction(processedImage, isDesktopCapture: true, debug: debug) ?? processedImage
         }
-        
-        // Choose extraction method based on simpleExtraction flag
+
         if simpleExtraction {
-            if debug {
-                print("Debug: Using simple LSB steganography extraction only")
-            }
-            // Go directly to LSB steganography for digital screenshots
-            if let stegoResult = SteganographyEngine.extractWatermark(from: processedImage) {
-                if debug {
-                    print("Debug: Simple steganography extraction succeeded")
-                }
-                return stegoResult
-            }
+            logger.debug("Using simple LSB steganography extraction only")
+            return SteganographyEngine.extractWatermark(from: processedImage)
         } else {
-            // Try robust extraction first (for camera photos) - ROI enhancement is now enabled by default
             if let robustResult = WatermarkEngine.extractPhotoResistantWatermark(from: processedImage, threshold: threshold, verbose: verbose, debug: debug) {
                 return parseWatermark(robustResult)
             }
-            
-            if debug {
-                print("Debug: Robust extraction failed, trying steganography fallback...")
-            }
-            
-            // Fall back to original steganography (for digital screenshots)  
-            if let stegoResult = SteganographyEngine.extractWatermark(from: processedImage) {
-                if debug {
-                    print("Debug: Steganography extraction succeeded")
-                }
-                return stegoResult
-            }
+
+            logger.debug("Robust extraction failed, trying steganography fallback...")
+            return SteganographyEngine.extractWatermark(from: processedImage)
         }
-        
-        if debug {
-            print("Debug: All extraction methods failed")
-            print("Debug: Processed image size: \(processedImage.width)x\(processedImage.height)")
-            print("Debug: Threshold used: \(threshold)")
-        }
-        
-        return nil
     }
-    
-    static func extractWatermarkFromPhotoData(_ data: Data, threshold: Double = WatermarkConstants.PHOTO_CONFIDENCE_THRESHOLD, verbose: Bool = false, debug: Bool = false, enableScreenDetection: Bool = true) -> (userID: String, watermark: String, timestamp: TimeInterval)? {
-        let logger = Logger(verbose: verbose, debug: debug)
-        
-        guard let image = loadImage(from: data, logger: logger) else {
-            logger.error("Failed to load image from data")
+
+    private static func validateFile(at url: URL, logger: Logger) throws {
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: url.path) else {
+            throw PhotoProcessorError.fileNotFound(url)
+        }
+
+        let attributes = try fileManager.attributesOfItem(atPath: url.path)
+        guard let fileSize = attributes[.size] as? Int64 else {
+            return // Not a critical error if size is unavailable
+        }
+
+        if fileSize == 0 { throw PhotoProcessorError.fileEmpty(url) }
+        if fileSize > 100_000_000 { logger.debug("File too large: \(fileSize) bytes (limit: 100MB)") }
+
+        guard let fileType = UTType(filenameExtension: url.pathExtension) else {
+            throw PhotoProcessorError.unknownFileType(url)
+        }
+
+        guard fileType.conforms(to: .image) else {
+            throw PhotoProcessorError.notAnImage(url, fileType.identifier)
+        }
+        logger.debug("File type validated: \(fileType.identifier)")
+    }
+
+    private static func logImageProperties(from imageSource: CGImageSource, logger: Logger, fromData: Bool = false) {
+        if let properties = CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [String: Any] {
+            let source = fromData ? "data" : "file"
+            logger.debug("Image properties from \(source): \(properties)")
+            if let pixelWidth = properties[kCGImagePropertyPixelWidth as String] as? Int,
+               let pixelHeight = properties[kCGImagePropertyPixelHeight as String] as? Int {
+                logger.debug("Image dimensions from \(source): \(pixelWidth)x\(pixelHeight)")
+            }
+        }
+    }
+
+    private static func getImageProperties(from url: URL) -> [String: Any]? {
+        guard let imageSource = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        return CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [String: Any]
+    }
+
+    private static func getImageProperties(from data: Data) -> [String: Any]? {
+        guard let imageSource = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        return CGImageSourceCopyPropertiesAtIndex(imageSource, 0, nil) as? [String: Any]
+    }
+
+    private static func detectAndCorrectScreen(from image: CGImage, verbose: Bool) -> CGImage? {
+        if let correctedImage = ScreenDetector.detectAndCorrectScreen(from: image, verbose: verbose) {
+            if verbose { print("Screen detected and corrected, new size: \(correctedImage.width)x\(correctedImage.height)") }
+            return correctedImage
+        } else {
+            if verbose { print("No screen detected, proceeding with original image") }
             return nil
         }
-        
-        // Try screen detection and perspective correction first
-        var processedImage = image
-        if enableScreenDetection {
-            if let correctedImage = ScreenDetector.detectAndCorrectScreen(from: image, verbose: verbose) {
-                if verbose {
-                    print("Screen detected and corrected from data, new size: \(correctedImage.width)x\(correctedImage.height)")
-                }
-                processedImage = correctedImage
-            } else {
-                if verbose {
-                    print("No screen detected in data, proceeding with original image")
-                }
-            }
-        } else {
-            if verbose {
-                print("Screen detection disabled for data, proceeding with original image")
-            }
-        }
-        
-        // Try robust extraction first (for camera photos) - ROI enhancement is now enabled by default
-        if let robustResult = WatermarkEngine.extractPhotoResistantWatermark(from: processedImage, threshold: threshold, verbose: verbose, debug: debug) {
-            return parseWatermark(robustResult)
-        }
-        
-        // Fall back to original steganography (for digital screenshots)
-        return SteganographyEngine.extractWatermark(from: processedImage)
     }
-    
+
     private static func parseWatermark(_ watermarkString: String) -> (userID: String, watermark: String, timestamp: TimeInterval)? {
         let components = watermarkString.components(separatedBy: ":")
-        
-        guard components.count >= 4,
-              let timestamp = TimeInterval(components.last!) else {
+        guard components.count >= 4, let timestamp = TimeInterval(components.last!) else {
             return nil
         }
-        
         let userID = components[0]
         let watermark = components[1..<components.count-1].joined(separator: ":")
-        
-        // Validate watermark format and content
-        guard isValidWatermark(userID: userID, watermark: watermark, timestamp: timestamp) else {
-            return nil
-        }
-        
-        return (userID: userID, watermark: watermark, timestamp: timestamp)
+        return isValidWatermark(userID: userID, watermark: watermark, timestamp: timestamp) ? (userID, watermark, timestamp) : nil
     }
-    
+
     private static func isValidWatermark(userID: String, watermark: String, timestamp: TimeInterval) -> Bool {
-        // Validate userID (should be non-empty and reasonable length)
-        guard !userID.isEmpty && userID.count <= 50 else {
-            return false
-        }
-        
-        // Validate watermark components (should contain computer name and UUID)
+        guard !userID.isEmpty && userID.count <= 50 else { return false }
         let watermarkComponents = watermark.components(separatedBy: ":")
-        guard watermarkComponents.count >= 2 else {
-            return false
-        }
-        
-        // Validate timestamp (should be within last 10 years and not future)
+        guard watermarkComponents.count >= 2 else { return false }
+
         let now = Date().timeIntervalSince1970
         let tenYearsAgo = now - (10 * 365 * 24 * 60 * 60)
-        guard timestamp >= tenYearsAgo && timestamp <= now + 3600 else { // Allow 1 hour future for clock skew
-            return false
-        }
-        
-        // Validate UUID format in watermark (basic check for UUID-like structure)
+        guard timestamp >= tenYearsAgo && timestamp <= now + 3600 else { return false }
+
         let possibleUUID = watermarkComponents.last ?? ""
         let uuidPattern = "^[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}$"
-        let uuidRegex = try? NSRegularExpression(pattern: uuidPattern, options: [])
-        let hasValidUUID = uuidRegex?.firstMatch(in: possibleUUID, options: [], range: NSRange(location: 0, length: possibleUUID.count)) != nil
-        
-        return hasValidUUID
+        return (try? NSRegularExpression(pattern: uuidPattern).firstMatch(in: possibleUUID, range: NSRange(location: 0, length: possibleUUID.utf16.count))) != nil
     }
-    
+
     static func batchExtractWatermarks(from urls: [URL]) -> [(url: URL, result: (userID: String, watermark: String, timestamp: TimeInterval)?)] {
         return urls.map { url in
             (url: url, result: extractWatermarkFromPhoto(at: url))
         }
     }
-    
+
     static func isImageFile(_ url: URL) -> Bool {
-        guard let type = UTType(filenameExtension: url.pathExtension) else {
-            return false
-        }
+        guard let type = UTType(filenameExtension: url.pathExtension) else { return false }
         return type.conforms(to: .image)
     }
-    
+
     static func preprocessImageForExtraction(_ image: CGImage, isDesktopCapture: Bool = false, debug: Bool = false) -> CGImage? {
         if isDesktopCapture {
             return preprocessDesktopCapture(image, debug: debug)
         }
-        
-        let width = image.width
-        let height = image.height
-        
+
         let colorSpace = CGColorSpaceCreateDeviceRGB()
-        guard let context = CGContext(
-            data: nil,
-            width: width,
-            height: height,
-            bitsPerComponent: 8,
-            bytesPerRow: 0,
-            space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else {
+        guard let context = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: 0, space: colorSpace, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
             return nil
         }
-        
         context.interpolationQuality = .none
-        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-        
+        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
         return context.makeImage()
     }
-    
+
     static func preprocessDesktopCapture(_ image: CGImage, debug: Bool = false) -> CGImage? {
-        if debug {
-            print("Debug: Applying desktop capture preprocessing")
-        }
-        
-        let width = image.width
-        let height = image.height
-        
+        if debug { print("Debug: Applying desktop capture preprocessing") }
+
         let colorSpace = CGColorSpaceCreateDeviceRGB()
-        guard let context = CGContext(
-            data: nil,
-            width: width,
-            height: height,
-            bitsPerComponent: 8,
-            bytesPerRow: 0,
-            space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else {
+        guard let context = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: 0, space: colorSpace, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
             return nil
         }
-        
-        // Set high quality interpolation for desktop captures
+
         context.interpolationQuality = .high
-        
-        // Apply contrast enhancement for better watermark visibility
-        // This helps counter compression artifacts from screenshots
         context.setAlpha(1.2) // Slight contrast boost
-        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-        
+        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+
         guard let enhancedImage = context.makeImage() else {
-            if debug {
-                print("Debug: Failed to create enhanced image, falling back to original")
-            }
+            if debug { print("Debug: Failed to create enhanced image, falling back to original") }
             return image
         }
-        
-        if debug {
-            print("Debug: Desktop capture preprocessing applied successfully")
-        }
-        
+
+        if debug { print("Debug: Desktop capture preprocessing applied successfully") }
         return enhancedImage
     }
-    
+
     static func isDesktopCapture(properties: [String: Any]) -> Bool {
-        // Check for screenshot indicators in EXIF data
-        if let exifDict = properties[kCGImagePropertyExifDictionary as String] as? [String: Any] {
-            if let userComment = exifDict[kCGImagePropertyExifUserComment as String] as? String {
-                return userComment.lowercased().contains("screenshot")
-            }
+        if let exifDict = properties[kCGImagePropertyExifDictionary as String] as? [String: Any],
+           let userComment = exifDict[kCGImagePropertyExifUserComment as String] as? String {
+            return userComment.lowercased().contains("screenshot")
         }
-        
-        // Check for PNG metadata indicating screenshot
-        if properties[kCGImagePropertyPNGDictionary as String] != nil {
-            // Screenshots often have PNG format, but this alone isn't conclusive
-            // We need more specific indicators, so only return true for EXIF screenshots
-        }
-        
         return false
     }
 }

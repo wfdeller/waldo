@@ -11,6 +11,7 @@ class WatermarkOverlayView: NSView {
     
     private var watermarkPattern: [UInt8] = []
     private let patternSize = WatermarkConstants.PATTERN_SIZE
+    private var luminousEnabled: Bool = false
     
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -30,6 +31,11 @@ class WatermarkOverlayView: NSView {
     func updateWatermarkData(_ newData: String, opacity: Int = WatermarkConstants.ALPHA_OPACITY) {
         watermarkData = newData
         generateWatermarkPattern(opacity: opacity)
+    }
+    
+    func setLuminousEnabled(_ enabled: Bool) {
+        luminousEnabled = enabled
+        needsDisplay = true
     }
     
     private func generateWatermarkPattern(opacity: Int = WatermarkConstants.ALPHA_OPACITY) {
@@ -408,6 +414,17 @@ class WatermarkOverlayView: NSView {
         
         // Draw discrete QR codes in screen corners
         drawCornerQRCodes(in: ctx, viewSize: viewSize, backingScaleFactor: backingScaleFactor)
+        
+        // Draw luminous markers if enabled
+        if luminousEnabled {
+            LuminousMarkerRenderer.renderLuminousMarkers(
+                in: ctx,
+                size: viewSize,
+                opacity: WatermarkConstants.ALPHA_OPACITY,
+                avoidCorners: true,
+                logger: Logger()
+            )
+        }
     }
     
     private func drawWatermarkTile(in context: CGContext, rect: CGRect) {

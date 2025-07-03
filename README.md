@@ -4,12 +4,21 @@ A macOS steganographic identification system with camera-detectable transparent 
 
 ## Features
 
-### Watermarking
+### Modular Overlay Types
 
--   **Camera-Detectable Overlays**: Watermarks that survive camera photo capture
--   **Multi-Layered Encoding**: Redundant embedding with error correction
--   **LSB Steganography**: Least Significant Bit embedding for digital screenshots
--   **Pattern Correlation**: Pattern matching for camera photos
+-   **QR Code Overlays**: Corner-positioned QR codes with high error correction
+-   **Luminous Overlays**: Brightness-based corner markers for enhanced camera detection and calibration
+-   **Steganography Overlays**: Invisible LSB embedding in pixel data
+-   **Hybrid Overlays**: Combines QR codes, RGB patterns, and steganography
+-   **Beagle Overlays**: Wireframe patterns for testing and development
+-   **Luminous Enhancement**: Add luminous corner markers to any overlay type with `--luminous` flag
+
+### Camera Detection Optimization
+
+-   **Luminance-Based Patterns**: Attempts to use brightness variations for better phone camera detection
+-   **Adaptive Brightness**: Attempts to adjust luminance based on background content
+-   **Blue Channel Modulation**: Attempts to embed QR data in blue channel for camera sensitivity
+-   **Corner Positioning**: Attempts to place detection markers in screen corners
 
 ### Desktop Watermarking
 
@@ -54,8 +63,14 @@ make build
 ### 2. Start Camera-Resistant Overlay
 
 ```bash
-# Start camera-detectable overlay watermarking
+# Start camera-detectable overlay watermarking (default hybrid type)
 ./.build/debug/waldo overlay start --daemon
+
+# Start with specific overlay type for better camera detection
+./.build/debug/waldo overlay start luminous --daemon
+
+# Start with luminous enhancement for better camera detection
+./.build/debug/waldo overlay start qr --luminous --daemon
 
 # Check overlay status
 ./.build/debug/waldo overlay status --verbose
@@ -80,8 +95,24 @@ make build
 ### Overlay Management
 
 ```bash
-# Start transparent overlay watermarking
-waldo overlay start [--daemon] [--opacity 40] [--verbose] [--debug]
+# Start overlay with specific type (new feature)
+waldo overlay start [overlay-type] [--luminous] [--daemon] [--opacity 40] [--verbose] [--debug]
+
+# Available overlay types:
+waldo overlay start qr                    # QR codes only
+waldo overlay start luminous              # Luminous brightness patterns (markers only)
+waldo overlay start steganography         # LSB steganography only
+waldo overlay start hybrid               # QR + RGB + steganography (default)
+waldo overlay start beagle               # Wireframe beagle (testing)
+
+# Luminous enhancement flag (adds corner markers for better detection):
+waldo overlay start qr --luminous         # QR codes with luminous markers
+waldo overlay start steganography --luminous # Steganography with luminous markers
+waldo overlay start hybrid --luminous     # Hybrid overlay with luminous markers
+
+
+# Default overlay type (hybrid) when no type specified
+waldo overlay start [--luminous] [--daemon] [--opacity 40] [--verbose] [--debug]
 
 # Stop overlay watermarking
 waldo overlay stop [--verbose] [--debug]
@@ -325,8 +356,11 @@ Next steps:
 #### 1. Real Camera Test
 
 ```bash
-# Start overlay on your screen
-waldo overlay start --opacity 60
+# Start luminous overlay for better camera detection
+waldo overlay start luminous --opacity 60
+
+# Or combine overlay types for maximum robustness
+waldo overlay start qr,luminous --opacity 80
 
 # Take a photo of your screen with a phone/camera
 # Save the photo to your computer
@@ -403,13 +437,15 @@ swift build
 
 ## How It Works
 
-### Camera-Resistant Overlay System
+### Modular Overlay System
 
-1. **LSB Steganography**: Embeds watermark data in the least significant bits of image pixels
-2. **Multi-Layer Embedding**: Creates watermarks using multiple techniques for redundancy
-3. **Overlay Creation**: Creates nearly invisible `NSWindow` with camera-detectable patterns
-4. **Adaptive Detection**: Uses correlation matching and pattern recognition for camera photos
-5. **Hourly Refresh**: Updates watermark data every hour for temporal tracking
+1. **Overlay Type Selection**: Choose from QR, luminous, steganography, hybrid, or beagle overlays
+2. **Luminous Patterns**: Attempts to use brightness variations for enhanced camera detection
+3. **QR Code Positioning**: Attempts to place QR codes in screen corners with blue channel modulation
+4. **LSB Steganography**: Embeds watermark data in the least significant bits of image pixels
+5. **Composite Rendering**: Attempts to combine multiple overlay types for increased robustness
+6. **Adaptive Detection**: Attempts to use luminance analysis and QR pattern matching
+7. **Hourly Refresh**: Updates watermark data every hour for temporal tracking
 
 ### Extraction Process
 
@@ -417,8 +453,9 @@ swift build
 2. **Desktop Capture Detection**: Identification of screenshots via EXIF data
 3. **Preprocessing**: Desktop-specific image enhancement and contrast boosting
 4. **Screen Detection**: Optional perspective correction for camera photos
-5. **Dual Extraction Paths**:
-    - **ROI Pipeline**: Multi-region enhancement for camera photos
+5. **Multi-Method Extraction**:
+    - **Luminous Detection**: Attempts to analyze brightness patterns in corner regions
+    - **ROI Pipeline**: Multi-region enhancement for QR code detection
     - **Simple LSB Extraction**: Fast steganographic decoding for digital screenshots
 6. **Progressive Parameter Testing**: Multiple threshold levels for difficult extractions
 7. **Error Correction**: Reconstructs watermark data with validation
@@ -439,6 +476,78 @@ username:computer-name:machine-uuid:timestamp
 ```
 
 Example: `alice:Alices-MacBook-Pro:A1B2C3D4-E5F6:1703875200`
+
+## Overlay Types
+
+### QR Code Overlays (`qr`)
+
+Attempts to place QR codes in screen corners with error correction:
+- Corner positioning for camera detection
+- Blue channel modulation for camera sensitivity
+- High error correction for photo capture robustness
+- Embeds username, machine name, UUID, and timestamp
+
+```bash
+waldo overlay start qr --opacity 80
+```
+
+### Luminous Overlays (`luminous`)
+
+Attempts to use brightness variations for enhanced camera detection:
+- Brightness-based patterns across the screen
+- Adaptive luminance based on background content
+- Corner luminance markers for detection
+- Perceptual luminance calculations
+
+```bash
+waldo overlay start luminous --opacity 60
+```
+
+### Steganography Overlays (`steganography`)
+
+Invisible LSB embedding in pixel data:
+- Least Significant Bit steganography
+- Invisible to human vision
+- Embeds watermark data in pixel channels
+- Best for digital screenshots
+
+```bash
+waldo overlay start steganography --opacity 40
+```
+
+### Hybrid Overlays (`hybrid`, default)
+
+Combines QR codes, RGB patterns, and steganography:
+- Maintains backward compatibility
+- Uses existing WatermarkOverlayView implementation
+- Multiple redundant embedding methods
+- Balanced approach for all scenarios
+
+```bash
+waldo overlay start hybrid --opacity 50
+waldo overlay start  # defaults to hybrid
+```
+
+### Beagle Overlays (`beagle`)
+
+Wireframe patterns for testing and development:
+- Simple wireframe beagle drawings
+- Includes username text
+- Visible overlay for testing
+- No watermark data embedding
+
+```bash
+waldo overlay start beagle --opacity 100
+```
+
+### Composite Overlays
+
+Multiple overlay types can be combined:
+```bash
+waldo overlay start qr,luminous --opacity 70        # QR + luminous
+waldo overlay start qr,steganography --opacity 60   # QR + steganography
+waldo overlay start luminous,steganography          # Luminous + steganography
+```
 
 ## Configuration
 
@@ -588,8 +697,10 @@ time waldo extract perf.png --simple-extraction
 #### Camera-Resistant Watermarking Test
 
 ```bash
-# Start camera-detectable overlay
-waldo overlay start --opacity 60
+# Test different overlay types for camera detection
+waldo overlay start luminous --opacity 60           # Brightness-based
+waldo overlay start qr --opacity 80                 # QR codes only
+waldo overlay start qr,luminous --opacity 100       # Combined approach
 
 # Take photo of screen with phone/camera
 # Extract watermark from camera photo
@@ -624,14 +735,17 @@ waldo extract empty_file.png --debug
 
 ### Technical Achievement
 
+-   **Modular overlay architecture** with support for multiple overlay types
+-   **Luminous overlay system** that attempts to use brightness patterns for camera detection
+-   **QR code positioning** that attempts corner placement with blue channel modulation
 -   **LSB steganography** for digital screenshot watermarking
--   **Camera-resistant overlay** watermarking across all displays
+-   **Composite rendering** that attempts to combine multiple overlay types
 -   **Desktop capture optimization** with screenshot detection and preprocessing
+-   **Multi-method extraction** with luminous, QR, and steganographic detection
 -   **Parameter tuning** with 25.5% signal strength and adaptive thresholds
 -   **Progressive extraction methods** with multiple fallback strategies
 -   **End-to-end validation** with testing framework
 -   **Performance protection** with timeout and infinite loop prevention
--   **Dual extraction paths** for both digital and camera photo sources
 
 ### Testing Innovation
 

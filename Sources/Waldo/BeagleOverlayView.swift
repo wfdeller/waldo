@@ -7,6 +7,7 @@ class BeagleOverlayView: NSView {
     private let lineWidth: Int
     private let opacity: Double
     private let userName: String
+    private var luminousEnabled: Bool = false
     
     init(frame frameRect: NSRect, tileSize: Int, lineWidth: Int, opacity: Double, userName: String) {
         self.tileSize = tileSize
@@ -29,6 +30,11 @@ class BeagleOverlayView: NSView {
     private func setupView() {
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
+    }
+    
+    func setLuminousEnabled(_ enabled: Bool) {
+        luminousEnabled = enabled
+        needsDisplay = true
     }
     
     override func draw(_ dirtyRect: NSRect) {
@@ -65,6 +71,17 @@ class BeagleOverlayView: NSView {
                 
                 context.restoreGState()
             }
+        }
+        
+        // Draw luminous markers if enabled
+        if luminousEnabled {
+            LuminousMarkerRenderer.renderLuminousMarkers(
+                in: context,
+                size: bounds.size,
+                opacity: Int(opacity * 255.0 / 100.0),
+                avoidCorners: true,
+                logger: Logger()
+            )
         }
     }
     

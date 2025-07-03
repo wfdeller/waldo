@@ -5,77 +5,122 @@ import CoreText
 import UniformTypeIdentifiers
 import Cocoa
 
+// Custom error types for more specific feedback
+enum WaldoError: Error, CustomStringConvertible {
+    case invalidThreshold(Double)
+    case fileNotFound(String)
+    case invalidImageFile(String)
+    case noWatermarkDetected
+    case overlayAlreadyRunning
+    case invalidOpacity(Int)
+    case invalidOutputPath(String)
+    case noActiveOverlay
+    case failedToSaveOverlay(Error)
+    case failedToCaptureDesktop(Error)
+    case invalidTileSize(Int)
+    case invalidLineWidth(Int)
+    case invalidOpacityPercentage(Double)
+    case failedToStartBeagleOverlay(Error)
+
+    var description: String {
+        switch self {
+        case .invalidThreshold(let value):
+            return "Error: Threshold must be between 0.0 and 1.0 (provided: \(value))"
+        case .fileNotFound(let path):
+            return "Error: File not found at \(path)"
+        case .invalidImageFile(let path):
+            return "Error: Not a valid image file at \(path)"
+        case .noWatermarkDetected:
+            return "No watermark detected in the image."
+        case .overlayAlreadyRunning:
+            return "Error: Overlay is already running. Use 'waldo overlay stop' first."
+        case .invalidOpacity(let value):
+            return "Error: Opacity must be between 1 and 255 (provided: \(value))"
+        case .invalidOutputPath(let path):
+            return "Error: Output file must have .png extension. Provided: \(path)"
+        case .noActiveOverlay:
+            return "Error: No active overlay found. Start overlay first with 'waldo overlay start'"
+        case .failedToSaveOverlay(let error):
+            return "Error: Failed to save overlay: \(error.localizedDescription)"
+        case .failedToCaptureDesktop(let error):
+            return "Error: Failed to capture desktop: \(error.localizedDescription)"
+        case .invalidTileSize(let value):
+            return "Error: Tile size must be between 50 and 500 pixels (provided: \(value))"
+        case .invalidLineWidth(let value):
+            return "Error: Line width must be between 1 and 10 pixels (provided: \(value))"
+        case .invalidOpacityPercentage(let value):
+            return "Error: Opacity must be between 0.1 and 100 percent (provided: \(value))"
+        case .failedToStartBeagleOverlay(let error):
+            return "Error: Failed to start overlay - \(error.localizedDescription)"
+        }
+    }
+}
+
 @main
 struct Waldo: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "waldo",
-        abstract: "Waldo - A steganographic desktop identification system for macOS",
+        abstract: "A steganographic desktop identification system for macOS.",
         subcommands: [ExtractCommand.self, OverlayCommand.self],
         defaultSubcommand: OverlayCommand.self
     )
 }
 
-
 struct ExtractCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "extract",
-        abstract: "Extract watermark from a photo"
+        abstract: "Extract a watermark from a photo."
     )
-    
-    @Argument(help: "Path to photo file")
+
+    @Argument(help: "Path to the photo file to extract a watermark from.")
     var photoPath: String
-    
-    @Option(name: .shortAndLong, help: "Confidence threshold (0.0-1.0, default: 0.6)")
+
+    @Option(name: .shortAndLong, help: "The confidence threshold for watermark detection (0.0 to 1.0).")
     var threshold: Double = WatermarkConstants.PHOTO_CONFIDENCE_THRESHOLD
-    
-    @Flag(name: .shortAndLong, help: "Show detailed information")
+
+    @Flag(name: .shortAndLong, help: "Show detailed information during extraction.")
     var verbose: Bool = false
-    
-    @Flag(name: .shortAndLong, help: "Show debug information for detection failures")
+
+    @Flag(name: .shortAndLong, help: "Show debugging information for detection failures.")
     var debug: Bool = false
-    
-    @Flag(name: .long, help: "Skip automatic screen detection and perspective correction")
+
+    @Flag(name: .long, help: "Disable automatic screen detection and perspective correction.")
     var noScreenDetection: Bool = false
-    
-    @Flag(name: .long, help: "Use simple LSB steganography extraction only (skip complex ROI processing)")
+
+    @Flag(name: .long, help: "Use only the simple LSB steganography extraction method.")
     var simpleExtraction: Bool = false
-    
+
     func run() throws {
         print("Waldo v\(Version.current)")
-        
-        // Validate threshold parameter
+
         guard threshold >= 0.0 && threshold <= 1.0 else {
-            print("Error: Threshold must be between 0.0 and 1.0 (provided: \(threshold))")
-            throw ExitCode.failure
+            throw WaldoError.invalidThreshold(threshold)
         }
-        
+
         let photoURL = URL(fileURLWithPath: photoPath)
-        
+
         guard FileManager.default.fileExists(atPath: photoPath) else {
-            print("Error: File not found at \(photoPath)")
-            throw ExitCode.failure
+            throw WaldoError.fileNotFound(photoPath)
         }
-        
+
         guard PhotoProcessor.isImageFile(photoURL) else {
-            print("Error: Not a valid image file")
-            throw ExitCode.failure
+            throw WaldoError.invalidImageFile(photoPath)
         }
-        
+
         if verbose {
             print("Using confidence threshold: \(threshold)")
         }
-        
+
         if let result = PhotoProcessor.extractWatermarkFromPhoto(at: photoURL, threshold: threshold, verbose: verbose, debug: debug, enableScreenDetection: !noScreenDetection, simpleExtraction: simpleExtraction) {
             print("Watermark detected!")
-            
-            // Display raw watermark data split on ":"
+
             let fullWatermark = "\(result.userID):\(result.watermark):\(Int(result.timestamp))"
             let components = fullWatermark.components(separatedBy: ":")
             let labels = ["Username", "Computer-name", "Machine-uuid", "Timestamp"]
-            
+
             for (index, component) in components.enumerated() {
                 let label = index < labels.count ? labels[index] : "Field \(index + 1)"
-                
+
                 if label == "Timestamp", let timestamp = Double(component) {
                     let date = Date(timeIntervalSince1970: timestamp)
                     let formatter = DateFormatter()
@@ -87,20 +132,16 @@ struct ExtractCommand: ParsableCommand {
                     print("\(label): \(component)")
                 }
             }
-            
         } else {
-            print("No watermark detected in the image")
-            throw ExitCode.failure
+            throw WaldoError.noWatermarkDetected
         }
     }
 }
 
-
-
 struct OverlayCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "overlay",
-        abstract: "Manage transparent desktop overlay watermarking",
+        abstract: "Manage the transparent desktop overlay watermark.",
         subcommands: [StartOverlayCommand.self, StopOverlayCommand.self, StatusOverlayCommand.self, SaveOverlayCommand.self, SaveDesktopCommand.self, DebugScreenCommand.self, OverlaySampleCommand.self]
     )
 }
@@ -108,9 +149,9 @@ struct OverlayCommand: ParsableCommand {
 struct DebugScreenCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "debug-screen",
-        abstract: "Debug screen resolution and display information"
+        abstract: "Debug screen resolution and display information."
     )
-    
+
     func run() throws {
         print("Display Configuration Debug")
         
@@ -135,7 +176,6 @@ struct DebugScreenCommand: ParsableCommand {
                 print("    \(key.rawValue): \(value)")
             }
             
-            // Try to get more display info using Core Graphics
             if let displayID = deviceDescription[.init("NSScreenNumber")] as? NSNumber {
                 let cgDisplayID = CGDirectDisplayID(displayID.uint32Value)
                 let pixelWidth = CGDisplayPixelsWide(cgDisplayID)
@@ -152,37 +192,55 @@ struct DebugScreenCommand: ParsableCommand {
 struct StartOverlayCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "start",
-        abstract: "Start transparent overlay watermarking"
+        abstract: "Start the transparent overlay watermark."
     )
-    
-    @Option(name: .shortAndLong, help: "Custom watermark text")
-    var watermark: String = "desktop"
-    
-    @Option(name: .shortAndLong, help: "Overlay opacity (1-255, default: 40)")
+
+    @Argument(help: "The overlay type to use. Available types: qr, luminous, steganography, hybrid, beagle. Defaults to 'hybrid'.")
+    var overlayType: String?
+
+    @Option(name: .shortAndLong, help: "The opacity of the overlay, from 1 (nearly transparent) to 255 (fully opaque).")
     var opacity: Int = WatermarkConstants.ALPHA_OPACITY
-    
-    @Flag(name: .long, help: "Run in background (daemon mode)")
+
+    @Flag(name: .long, help: "Run the overlay as a background process (daemon).")
     var daemon: Bool = false
-    
-    @Flag(name: .shortAndLong, help: "Show verbose information")
+
+    @Flag(name: .shortAndLong, help: "Show verbose information during startup.")
     var verbose: Bool = false
-    
-    @Flag(name: .shortAndLong, help: "Show debug information for overlay startup")
+
+    @Flag(name: .shortAndLong, help: "Show debugging information for overlay startup.")
     var debug: Bool = false
     
+    @Flag(name: .long, help: "Add luminous corner markers to enhance detection and calibration.")
+    var luminous: Bool = false
+
     func run() throws {
         let logger = Logger(verbose: verbose, debug: debug)
         
         print("Waldo v\(Version.current)")
-        print("Watermark pattern size: \(WatermarkConstants.PATTERN_SIZE) pixels")
         
-        logger.debug("Starting overlay command with opacity: \(opacity), daemon: \(daemon)")
-        
-        // Validate opacity parameter
-        guard opacity >= 1 && opacity <= 255 else {
-            print("Error: Opacity must be between 1 and 255 (provided: \(opacity))")
-            throw ExitCode.failure
+        // Parse overlay type
+        let type: OverlayType
+        if let overlayTypeString = overlayType {
+            guard let parsedType = OverlayType.from(string: overlayTypeString) else {
+                throw OverlayTypeError(invalidType: overlayTypeString)
+            }
+            type = parsedType
+        } else {
+            type = OverlayType.defaultType
         }
+        
+        print("Using overlay type: \(type.rawValue)")
+        print("  - \(type.description)")
+        
+        logger.debug("Starting overlay command with type: \(type), luminous: \(luminous), opacity: \(opacity), daemon: \(daemon)")
+        
+        guard opacity >= 1 && opacity <= 255 else {
+            throw WaldoError.invalidOpacity(opacity)
+        }
+        
+        // Validate parameters for the overlay type
+        let renderer = OverlayRendererFactory.createRenderer(for: type)
+        try renderer.validateParameters(opacity: opacity)
         
         let manager = OverlayWindowManager.shared
         
@@ -192,14 +250,12 @@ struct StartOverlayCommand: ParsableCommand {
         
         if status["active"] as? Bool == true {
             logger.debug("Overlay already active, exiting")
-            print("Error: Overlay is already running. Use 'waldo overlay stop' first.")
-            throw ExitCode.failure
+            throw WaldoError.overlayAlreadyRunning
         }
         
-        logger.debug("Starting overlay manager...")
-        manager.startOverlays(opacity: opacity, logger: logger)
+        logger.debug("Starting overlay manager with type: \(type), luminous: \(luminous)")
+        manager.startOverlays(overlayType: type, opacity: opacity, luminous: luminous, logger: logger)
         
-        // Display watermark details
         let systemInfo = SystemInfo.getSystemInfo()
         print("\nWatermark Details:")
         print(".  Username: \(systemInfo["username"] ?? "unknown")")
@@ -235,15 +291,15 @@ struct StartOverlayCommand: ParsableCommand {
 struct StopOverlayCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "stop",
-        abstract: "Stop transparent overlay watermarking"
+        abstract: "Stop the transparent overlay watermark."
     )
-    
-    @Flag(name: .shortAndLong, help: "Show verbose information")
+
+    @Flag(name: .shortAndLong, help: "Show verbose information during shutdown.")
     var verbose: Bool = false
-    
-    @Flag(name: .shortAndLong, help: "Show debug information for overlay shutdown")
+
+    @Flag(name: .shortAndLong, help: "Show debugging information for overlay shutdown.")
     var debug: Bool = false
-    
+
     func run() throws {
         let logger = Logger(verbose: verbose, debug: debug)
         let stopTime = CFAbsoluteTimeGetCurrent()
@@ -256,12 +312,9 @@ struct StopOverlayCommand: ParsableCommand {
         let status = manager.getStatus()
         logger.debug("Current status: \(status)")
         
-        // First try to stop local overlays (if running in same process)
         logger.debug("Attempting to stop local overlay manager...")
         manager.stopOverlays(logger: logger)
         
-        // Check for and terminate any waldo overlay start processes
-        // (whether daemon or interactive) - this bypasses getStatus() issues
         logger.debug("Searching for external overlay processes...")
         let terminatedCount = terminateOverlayProcesses(logger: logger)
         
@@ -278,7 +331,6 @@ struct StopOverlayCommand: ParsableCommand {
     
     private func terminateOverlayProcesses(logger: Logger = Logger()) -> Int {
         logger.debug("Using pgrep to find waldo overlay processes")
-        // Use pgrep to find waldo processes - faster and more reliable than ps
         let task = Process()
         task.launchPath = "/usr/bin/pgrep"
         task.arguments = ["-f", "waldo overlay start"]
@@ -288,7 +340,6 @@ struct StopOverlayCommand: ParsableCommand {
         task.standardError = Pipe()
         task.launch()
         
-        // Add timeout to prevent hanging
         let semaphore = DispatchSemaphore(value: 0)
         var taskCompleted = false
         
@@ -315,14 +366,12 @@ struct StopOverlayCommand: ParsableCommand {
             return 0
         }
         
-        // Parse PIDs and terminate processes
         let currentPID = ProcessInfo.processInfo.processIdentifier
         let pidStrings = output.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: .newlines)
         var terminatedCount = 0
         
         for pidString in pidStrings {
             if let pid = Int32(pidString.trimmingCharacters(in: .whitespaces)), pid != currentPID {
-                // Send SIGTERM signal to gracefully stop the process
                 if kill(pid, SIGTERM) == 0 {
                     terminatedCount += 1
                     print("✓ Terminated waldo overlay process (PID: \(pid))")
@@ -339,15 +388,15 @@ struct StopOverlayCommand: ParsableCommand {
 struct StatusOverlayCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "status",
-        abstract: "Show overlay status and statistics"
+        abstract: "Show overlay status and statistics."
     )
-    
-    @Flag(name: .shortAndLong, help: "Show verbose output")
+
+    @Flag(name: .shortAndLong, help: "Show verbose system and display information.")
     var verbose: Bool = false
-    
-    @Flag(name: .shortAndLong, help: "Show debug information for status check")
+
+    @Flag(name: .shortAndLong, help: "Show debugging information for the status check.")
     var debug: Bool = false
-    
+
     func run() throws {
         let logger = Logger(verbose: verbose, debug: debug)
         let statusTime = CFAbsoluteTimeGetCurrent()
@@ -380,7 +429,6 @@ struct StatusOverlayCommand: ParsableCommand {
             print(".  Overlay Windows: \(status["overlayWindowsCount"] ?? 0)")
         }
         
-        // Display resolution info
         if let logicalSize = status["screenLogicalSize"] as? String,
            let logicalRes = status["screenLogicalResolution"] as? String,
            let scale = status["backingScaleFactor"] as? CGFloat {
@@ -412,44 +460,40 @@ struct StatusOverlayCommand: ParsableCommand {
 struct SaveOverlayCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "save-overlay",
-        abstract: "Save watermark overlay as PNG for testing"
+        abstract: "Save a watermark overlay as a PNG for testing."
     )
-    
-    @Argument(help: "Output PNG file path")
+
+    @Argument(help: "The file path to save the PNG output.")
     var outputPath: String
-    
-    @Option(name: .shortAndLong, help: "Image width (default: 1920)")
+
+    @Option(name: .shortAndLong, help: "The width of the output image in pixels.")
     var width: Int = 1920
-    
-    @Option(name: .shortAndLong, help: "Image height (default: 1080)")
+
+    @Option(name: .shortAndLong, help: "The height of the output image in pixels.")
     var height: Int = 1080
-    
-    @Option(name: .shortAndLong, help: "Overlay opacity (1-255, default: 40)")
+
+    @Option(name: .shortAndLong, help: "The opacity of the overlay, from 1 (nearly transparent) to 255 (fully opaque).")
     var opacity: Int = WatermarkConstants.ALPHA_OPACITY
-    
-    @Flag(name: .shortAndLong, help: "Show verbose information")
+
+    @Flag(name: .shortAndLong, help: "Show verbose information during image generation.")
     var verbose: Bool = false
-    
-    @Flag(name: .shortAndLong, help: "Show debug information")
+
+    @Flag(name: .shortAndLong, help: "Show debugging information for image generation.")
     var debug: Bool = false
-    
+
     func run() throws {
         let logger = Logger(verbose: verbose, debug: debug)
         
         print("Waldo v\(Version.current)")
         print("Saving watermark overlay to: \(outputPath)")
         
-        // Validate opacity parameter
         guard opacity >= 1 && opacity <= 255 else {
-            print("Error: Opacity must be between 1 and 255 (provided: \(opacity))")
-            throw ExitCode.failure
+            throw WaldoError.invalidOpacity(opacity)
         }
         
-        // Validate output path
         let outputURL = URL(fileURLWithPath: outputPath)
         guard outputURL.pathExtension.lowercased() == "png" else {
-            print("Error: Output file must have .png extension")
-            throw ExitCode.failure
+            throw WaldoError.invalidOutputPath(outputPath)
         }
         
         logger.debug("Creating overlay image with dimensions: \(width)x\(height)")
@@ -459,7 +503,6 @@ struct SaveOverlayCommand: ParsableCommand {
             try saveWatermarkOverlay(to: outputURL, width: width, height: height, opacity: opacity, logger: logger)
             print("✓ Watermark overlay saved successfully")
             
-            // Display watermark details
             let systemInfo = SystemInfo.getSystemInfo()
             print("\nWatermark Details:")
             print(".  Username: \(systemInfo["username"] ?? "unknown")")
@@ -467,13 +510,11 @@ struct SaveOverlayCommand: ParsableCommand {
             print(".  Machine UUID: \(systemInfo["machineUUID"] ?? "unknown")")
             print(".  Timestamp: \(SystemInfo.getFormattedTimestamp())")
             
-            // Suggest test command
             print("\nTest extraction with:")
             print("  waldo extract \(outputPath) --verbose")
             
         } catch {
-            print("Error: Failed to save overlay: \(error.localizedDescription)")
-            throw ExitCode.failure
+            throw WaldoError.failedToSaveOverlay(error)
         }
     }
     
@@ -482,7 +523,6 @@ struct SaveOverlayCommand: ParsableCommand {
         
         logger.debug("Creating bitmap context...")
         
-        // Create bitmap context with RGBA format
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
         
@@ -500,24 +540,18 @@ struct SaveOverlayCommand: ParsableCommand {
         
         logger.debug("Bitmap context created successfully")
         
-        // First, create a base image with LSB steganography
         logger.debug("Creating base image for LSB steganography...")
         
-        // Get current watermark data
         let watermarkData = SystemInfo.getWatermarkDataWithHourlyTimestamp()
         logger.debug("Watermark data: \(watermarkData)")
         
-        // Create a neutral base image
         context.setFillColor(red: 0.5, green: 0.5, blue: 0.5, alpha: CGFloat(opacity) / 255.0)
         context.fill(CGRect(x: 0, y: 0, width: width, height: height))
         
-        // Create base image
         guard let baseImage = context.makeImage() else {
             throw NSError(domain: "WaldoError", code: 5, userInfo: [NSLocalizedDescriptionKey: "Failed to create base image"])
         }
         
-        // Apply LSB steganography first using existing engine
-        // Parse watermark data to get components
         let components = watermarkData.components(separatedBy: ":")
         guard components.count >= 4 else {
             throw NSError(domain: "WaldoError", code: 8, userInfo: [NSLocalizedDescriptionKey: "Invalid watermark data format"])
@@ -531,26 +565,20 @@ struct SaveOverlayCommand: ParsableCommand {
             throw NSError(domain: "WaldoError", code: 8, userInfo: [NSLocalizedDescriptionKey: "Failed to embed LSB watermark"])
         }
         
-        // Clear context and draw the LSB image as base
         context.clear(CGRect(x: 0, y: 0, width: width, height: height))
         context.draw(lsbImage, in: CGRect(x: 0, y: 0, width: width, height: height))
         
         logger.debug("Skipping visual patterns to preserve LSB data integrity...")
         
-        // Skip visual patterns for now to ensure LSB extraction works reliably
-        // TODO: Implement truly non-interfering visual patterns for camera detection
-        
         let renderTime = CFAbsoluteTimeGetCurrent() - startTime
         logger.timing("Complex watermark with LSB rendering", duration: renderTime)
         
-        // Create image from context
         guard let cgImage = context.makeImage() else {
             throw NSError(domain: "WaldoError", code: 2, userInfo: [NSLocalizedDescriptionKey: "Failed to create image from context"])
         }
         
         logger.debug("Saving PNG to: \(url.path)")
         
-        // Save as PNG
         guard let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil) else {
             throw NSError(domain: "WaldoError", code: 3, userInfo: [NSLocalizedDescriptionKey: "Failed to create image destination"])
         }
@@ -566,58 +594,44 @@ struct SaveOverlayCommand: ParsableCommand {
         logger.debug("PNG saved successfully")
     }
     
-    
-    // MARK: - Complex Watermark Pattern Generation (matches WatermarkOverlayView)
-    
     private func generateComplexWatermarkPattern(watermarkData: String, opacity: Int, logger: Logger) -> [UInt8] {
         logger.debug("Generating complex watermark pattern...")
         
         let patternSize = WatermarkConstants.PATTERN_SIZE
-        
-        // Generate micro QR pattern for the watermark data
         let microPattern = generateMicroQRPattern(from: watermarkData)
-        
-        // Create redundant patterns across the overlay
         let redundantPattern = generateRedundantPattern(from: watermarkData)
         
-        // Combine patterns with blue channel QR modulation for better camera detection
         var pattern: [UInt8] = []
         for i in 0..<(patternSize * patternSize * 4) {
             let pixelIndex = i / 4
             let channelIndex = i % 4
             
-            // Get bits from patterns
             let microBit = microPattern[pixelIndex % microPattern.count]
             let redundantBit = redundantPattern[pixelIndex % redundantPattern.count]
             
             switch channelIndex {
-            case 0: // Red channel - subtle redundant watermark only
+            case 0: // Red
                 let baseValue: UInt8 = UInt8(WatermarkConstants.RGB_BASE)
                 if redundantBit == 1 {
-                    pattern.append(baseValue + UInt8(WatermarkConstants.RGB_DELTA / 2))  // Subtle red modulation
+                    pattern.append(baseValue + UInt8(WatermarkConstants.RGB_DELTA / 2))
                 } else {
                     pattern.append(baseValue)
                 }
-                
-            case 1: // Green channel - minimal modulation for natural appearance
+            case 1: // Green
                 let baseValue: UInt8 = UInt8(WatermarkConstants.RGB_BASE)
                 if redundantBit == 1 {
-                    pattern.append(baseValue + UInt8(WatermarkConstants.RGB_DELTA / 3))  // Very subtle green
+                    pattern.append(baseValue + UInt8(WatermarkConstants.RGB_DELTA / 3))
                 } else {
                     pattern.append(baseValue)
                 }
-                
-            case 2: // Blue channel - PRIMARY QR code embedding
+            case 2: // Blue
                 let baseValue: UInt8 = UInt8(WatermarkConstants.RGB_BASE)
                 if microBit == 1 {
-                    // Strong blue signal for QR bits - cameras often have better blue channel sensitivity
                     pattern.append(baseValue + UInt8(WatermarkConstants.RGB_DELTA))
                 } else {
-                    // Lower blue for QR background
                     pattern.append(baseValue - UInt8(WatermarkConstants.RGB_DELTA / 2))
                 }
-                
-            default: // Alpha channel
+            default: // Alpha
                 pattern.append(UInt8(opacity))
             }
         }
@@ -627,35 +641,22 @@ struct SaveOverlayCommand: ParsableCommand {
     }
     
     private func generateMicroQRPattern(from data: String) -> [UInt8] {
-        // Create Version 2 QR code (37x37) with high error correction
-        let qrSize = WatermarkConstants.QR_VERSION2_SIZE  // Version 2 QR code size
+        let qrSize = WatermarkConstants.QR_VERSION2_SIZE
         var pattern = [UInt8](repeating: 0, count: qrSize * qrSize)
         
-        // Draw three finder patterns (classic QR code corners)
-        drawFinderPattern(&pattern, size: qrSize, x: 0, y: 0)           // Top-left
-        drawFinderPattern(&pattern, size: qrSize, x: qrSize-7, y: 0)     // Top-right  
-        drawFinderPattern(&pattern, size: qrSize, x: 0, y: qrSize-7)     // Bottom-left
-        
-        // Draw separator patterns around finder patterns (1 pixel white border)
+        drawFinderPattern(&pattern, size: qrSize, x: 0, y: 0)
+        drawFinderPattern(&pattern, size: qrSize, x: qrSize-7, y: 0)
+        drawFinderPattern(&pattern, size: qrSize, x: 0, y: qrSize-7)
         drawSeparatorPatterns(&pattern, size: qrSize)
-        
-        // Draw alignment pattern for Version 2 (center: 18,18)
-        drawAlignmentPattern(&pattern, size: qrSize, x: 16, y: 16)  // 5x5 pattern centered at (18,18)
-        
-        // Draw timing patterns (horizontal and vertical lines)
+        drawAlignmentPattern(&pattern, size: qrSize, x: 16, y: 16)
         drawTimingPatterns(&pattern, size: qrSize)
-        
-        // Add format information areas (reserved for error correction level)
         addFormatInformation(&pattern, size: qrSize)
-        
-        // Embed data with Reed-Solomon error correction (ECC Level H)
         embedDataWithErrorCorrection(&pattern, size: qrSize, data: data)
         
         return pattern
     }
     
     private func generateRedundantPattern(from data: String) -> [UInt8] {
-        // Create redundant encoding with error correction
         let errorCorrectedData = addSimpleErrorCorrection(data)
         let stringData = Data(errorCorrectedData.utf8)
         let bits = stringData.flatMap { byte in
@@ -665,7 +666,6 @@ struct SaveOverlayCommand: ParsableCommand {
         let patternSize = WatermarkConstants.PATTERN_SIZE
         var pattern = [UInt8](repeating: 0, count: patternSize * patternSize)
         
-        // Repeat the pattern multiple times across the overlay
         for i in 0..<pattern.count {
             pattern[i] = UInt8(bits[i % bits.count])
         }
@@ -674,7 +674,6 @@ struct SaveOverlayCommand: ParsableCommand {
     }
     
     private func addSimpleErrorCorrection(_ input: String) -> String {
-        // Simple repetition code - repeat each character 3 times for error correction
         return input.map { String(repeating: String($0), count: 3) }.joined()
     }
     
@@ -695,7 +694,6 @@ struct SaveOverlayCommand: ParsableCommand {
                     width: patternCGSize.width,
                     height: patternCGSize.height
                 )
-                
                 drawWatermarkTile(context: context, pattern: pattern, rect: tileRect)
             }
         }
@@ -725,45 +723,38 @@ struct SaveOverlayCommand: ParsableCommand {
     }
     
     private func drawCornerQRCodes(context: CGContext, watermarkData: String, width: Int, height: Int, opacity: Int, logger: Logger) {
-        // Version 2 QR codes with blue channel modulation for better camera detection
-        let qrPixelSize = WatermarkConstants.QR_VERSION2_SIZE  // Version 2 QR code modules
-        let pixelsPerQRBit: CGFloat = CGFloat(WatermarkConstants.QR_VERSION2_PIXELS_PER_MODULE)  // Pixels per QR module
-        let qrSize: CGFloat = CGFloat(WatermarkConstants.QR_VERSION2_PIXEL_SIZE)  // Total pixel size
-        let margin: CGFloat = CGFloat(WatermarkConstants.QR_VERSION2_MARGIN)   // Consistent margin
-        let menuBarOffset: CGFloat = CGFloat(WatermarkConstants.QR_VERSION2_MENU_BAR_OFFSET)  // Consistent offset
+        let qrPixelSize = WatermarkConstants.QR_VERSION2_SIZE
+        let pixelsPerQRBit: CGFloat = CGFloat(WatermarkConstants.QR_VERSION2_PIXELS_PER_MODULE)
+        let qrSize: CGFloat = CGFloat(WatermarkConstants.QR_VERSION2_PIXEL_SIZE)
+        let margin: CGFloat = CGFloat(WatermarkConstants.QR_VERSION2_MARGIN)
+        let menuBarOffset: CGFloat = CGFloat(WatermarkConstants.QR_VERSION2_MENU_BAR_OFFSET)
         
-        // Generate QR pattern for current watermark data
         let qrPattern = generateMicroQRPattern(from: watermarkData)
         if qrPattern.count != qrPixelSize * qrPixelSize {
             logger.debug("Warning: QR pattern size mismatch: \(qrPattern.count) elements, expected \(qrPixelSize * qrPixelSize)")
         }
         
-        // Define corner positions (adjust for image coordinates vs screen coordinates)
         let corners = [
-            CGPoint(x: CGFloat(width) - qrSize - margin, y: CGFloat(height) - menuBarOffset - qrSize),  // Top-right
-            CGPoint(x: margin, y: CGFloat(height) - menuBarOffset - qrSize),                           // Top-left
-            CGPoint(x: CGFloat(width) - qrSize - margin, y: margin),                                   // Bottom-right
-            CGPoint(x: margin, y: margin)                                                              // Bottom-left
+            CGPoint(x: CGFloat(width) - qrSize - margin, y: CGFloat(height) - menuBarOffset - qrSize),
+            CGPoint(x: margin, y: CGFloat(height) - menuBarOffset - qrSize),
+            CGPoint(x: CGFloat(width) - qrSize - margin, y: margin),
+            CGPoint(x: margin, y: margin)
         ]
         
         logger.debug("Drawing QR codes at \(corners.count) corner positions")
         
-        // Draw QR code at each corner
         for corner in corners {
             drawQRCode(context: context, at: corner, size: qrSize, pattern: qrPattern, patternSize: qrPixelSize, pixelsPerBit: pixelsPerQRBit, opacity: opacity)
         }
     }
     
     private func drawQRCode(context: CGContext, at position: CGPoint, size: CGFloat, pattern: [UInt8], patternSize: Int, pixelsPerBit: CGFloat, opacity: Int) {
-        // Each QR bit is rendered as pixelsPerBit x pixelsPerBit pixels with blue channel modulation
-        
         for y in 0..<patternSize {
             for x in 0..<patternSize {
                 let patternIndex = y * patternSize + x
                 if patternIndex < pattern.count {
                     let bit = pattern[patternIndex]
                     
-                    // Blue channel modulation: embed QR in blue while maintaining visual subtlety
                     let baseColor: CGFloat = CGFloat(WatermarkConstants.RGB_BASE) / 255.0
                     let deltaColor: CGFloat = CGFloat(WatermarkConstants.RGB_DELTA) / 255.0
                     
@@ -781,14 +772,11 @@ struct SaveOverlayCommand: ParsableCommand {
                         width: pixelsPerBit,
                         height: pixelsPerBit
                     )
-                    
                     context.fill(pixelRect)
                 }
             }
         }
     }
-    
-    // MARK: - QR Code Pattern Generation Helper Functions
     
     private func drawFinderPattern(_ pattern: inout [UInt8], size: Int, x: Int, y: Int) {
         let finderSize = 7
@@ -798,7 +786,6 @@ struct SaveOverlayCommand: ParsableCommand {
                 let py = y + dy
                 if px < size && py < size {
                     let index = py * size + px
-                    // Create the classic QR finder pattern
                     let isOuterRing = (dx == 0 || dx == 6 || dy == 0 || dy == 6)
                     let isInnerSquare = (dx >= 2 && dx <= 4 && dy >= 2 && dy <= 4)
                     pattern[index] = (isOuterRing || isInnerSquare) ? 1 : 0
@@ -824,17 +811,14 @@ struct SaveOverlayCommand: ParsableCommand {
     }
     
     private func drawTimingPatterns(_ pattern: inout [UInt8], size: Int) {
-        // Horizontal timing pattern (row 6, skipping finder and format areas)
         for x in 8..<(size-8) {
-            if x != 6 {  // Skip format information column
+            if x != 6 {
                 let index = 6 * size + x
                 pattern[index] = UInt8(x % 2)
             }
         }
-        
-        // Vertical timing pattern (column 6, skipping finder and format areas)
         for y in 8..<(size-8) {
-            if y != 6 {  // Skip format information row
+            if y != 6 {
                 let index = y * size + 6
                 pattern[index] = UInt8(y % 2)
             }
@@ -842,60 +826,47 @@ struct SaveOverlayCommand: ParsableCommand {
     }
     
     private func drawSeparatorPatterns(_ pattern: inout [UInt8], size: Int) {
-        // White separator borders around finder patterns
-        
-        // Top-left finder separator
         for x in 0..<8 {
             if x < size && 7 < size {
-                pattern[7 * size + x] = 0  // Bottom border
+                pattern[7 * size + x] = 0
             }
         }
         for y in 0..<8 {
             if 7 < size && y < size {
-                pattern[y * size + 7] = 0  // Right border
+                pattern[y * size + 7] = 0
             }
         }
-        
-        // Top-right finder separator
         for x in (size-8)..<size {
             if x >= 0 && x < size && 7 < size {
-                pattern[7 * size + x] = 0  // Bottom border
+                pattern[7 * size + x] = 0
             }
         }
         for y in 0..<8 {
             if (size-8) >= 0 && (size-8) < size && y < size {
-                pattern[y * size + (size-8)] = 0  // Left border
+                pattern[y * size + (size-8)] = 0
             }
         }
-        
-        // Bottom-left finder separator
         for x in 0..<8 {
             if x < size && (size-8) >= 0 && (size-8) < size {
-                pattern[(size-8) * size + x] = 0  // Top border
+                pattern[(size-8) * size + x] = 0
             }
         }
         for y in (size-8)..<size {
             if 7 < size && y >= 0 && y < size {
-                pattern[y * size + 7] = 0  // Right border
+                pattern[y * size + 7] = 0
             }
         }
     }
     
     private func addFormatInformation(_ pattern: inout [UInt8], size: Int) {
-        // Reserve format information areas (will be filled with ECC Level H indicator)
-        // Format info is placed around top-left and split between top-right/bottom-left
-        
-        // Format information around top-left finder pattern
         for i in 0..<6 {
             if i < size && 8 < size {
-                pattern[8 * size + i] = 0  // Horizontal format strip
+                pattern[8 * size + i] = 0
             }
             if 8 < size && i < size {
-                pattern[i * size + 8] = 0  // Vertical format strip
+                pattern[i * size + 8] = 0
             }
         }
-        
-        // Skip timing pattern intersection
         for i in 7..<9 {
             if i < size && 8 < size {
                 pattern[8 * size + i] = 0
@@ -904,41 +875,35 @@ struct SaveOverlayCommand: ParsableCommand {
                 pattern[i * size + 8] = 0
             }
         }
-        
-        // Format information in other corners
         for i in 0..<8 {
             if (size-1-i) >= 0 && (size-1-i) < size && 8 < size {
-                pattern[8 * size + (size-1-i)] = 0  // Top-right format
+                pattern[8 * size + (size-1-i)] = 0
             }
             if (size-7+i) >= 0 && (size-7+i) < size && 8 < size {
-                pattern[(size-7+i) * size + 8] = 0  // Bottom-left format
+                pattern[(size-7+i) * size + 8] = 0
             }
         }
     }
     
     private func isFormatInformationArea(x: Int, y: Int, size: Int) -> Bool {
-        // Check if position is in format information area
         let inHorizontalFormat = (y == 8 && (x < 9 || x >= size-8))
         let inVerticalFormat = (x == 8 && (y < 9 || y >= size-7))
         return inHorizontalFormat || inVerticalFormat
     }
     
     private func embedDataWithErrorCorrection(_ pattern: inout [UInt8], size: Int, data: String) {
-        // Enhanced error correction using Reed-Solomon principles
         let errorCorrectedData = generateHighErrorCorrectionData(data)
         let stringData = Data(errorCorrectedData.utf8)
         let bits = stringData.flatMap { byte in
-            (0..<8).map { (byte >> (7-$0)) & 1 }  // MSB first for proper QR encoding
+            (0..<8).map { (byte >> (7-$0)) & 1 }
         }
         
         var bitIndex = 0
-        
-        // QR code data placement follows zigzag pattern from bottom-right
         var up = true
         var col = size - 1
         
         while col > 0 {
-            if col == 6 { col -= 1 }  // Skip timing column
+            if col == 6 { col -= 1 }
             
             for _ in 0..<size {
                 for c in 0..<2 {
@@ -948,9 +913,8 @@ struct SaveOverlayCommand: ParsableCommand {
                     if x >= 0 && x < size && y >= 0 && y < size {
                         let index = y * size + x
                         
-                        // Check if this position is available for data
                         let inFinder = isFinderPatternArea(x: x, y: y, size: size)
-                        let inAlignment = (x >= 16 && x <= 20 && y >= 16 && y <= 20)  // Version 2 alignment at (18,18)
+                        let inAlignment = (x >= 16 && x <= 20 && y >= 16 && y <= 20)
                         let inTiming = (x == 6 || y == 6)
                         let inFormat = isFormatInformationArea(x: x, y: y, size: size)
                         
@@ -958,7 +922,7 @@ struct SaveOverlayCommand: ParsableCommand {
                             if bitIndex < bits.count {
                                 pattern[index] = UInt8(bits[bitIndex])
                             } else {
-                                pattern[index] = 0  // Padding
+                                pattern[index] = 0
                             }
                             bitIndex += 1
                         }
@@ -979,57 +943,41 @@ struct SaveOverlayCommand: ParsableCommand {
     }
     
     private func generateHighErrorCorrectionData(_ input: String) -> String {
-        // Enhanced error correction for ECC Level H (30% recovery capability)
-        // Use multiple redundancy techniques:
-        
-        // 1. Character-level repetition (3x)
         let characterRepeated = input.map { String(repeating: String($0), count: 3) }.joined()
-        
-        // 2. Block-level redundancy - repeat entire message
         let blockRepeated = String(repeating: characterRepeated + "|", count: 2)
-        
-        // 3. Checksum for validation
         let checksum = input.reduce(0) { $0 + Int($1.asciiValue ?? 0) } % 256
         let checksumHex = String(format: "%02X", checksum)
-        
         return blockRepeated + checksumHex
     }
     
     private func drawSubtleCornerQRCodes(context: CGContext, watermarkData: String, width: Int, height: Int, opacity: Int, logger: Logger) {
-        // Only draw corner QR codes with very subtle opacity to preserve LSB data
         let qrPixelSize = WatermarkConstants.QR_VERSION2_SIZE
         let pixelsPerQRBit: CGFloat = CGFloat(WatermarkConstants.QR_VERSION2_PIXELS_PER_MODULE)
         let qrSize: CGFloat = CGFloat(WatermarkConstants.QR_VERSION2_PIXEL_SIZE)
         let margin: CGFloat = CGFloat(WatermarkConstants.QR_VERSION2_MARGIN)
         let menuBarOffset: CGFloat = CGFloat(WatermarkConstants.QR_VERSION2_MENU_BAR_OFFSET)
         
-        // Generate QR pattern
         let qrPattern = generateMicroQRPattern(from: watermarkData)
         
-        // Define corner positions (just corners, no center patterns)
         let corners = [
-            CGPoint(x: CGFloat(width) - qrSize - margin, y: CGFloat(height) - menuBarOffset - qrSize),  // Top-right
-            CGPoint(x: margin, y: margin)                                                              // Bottom-left only
+            CGPoint(x: CGFloat(width) - qrSize - margin, y: CGFloat(height) - menuBarOffset - qrSize),
+            CGPoint(x: margin, y: margin)
         ]
         
         logger.debug("Drawing subtle QR codes at \(corners.count) corner positions")
         
-        // Draw very subtle QR codes that don't interfere with LSB
         for corner in corners {
             drawSubtleQRCode(context: context, at: corner, size: qrSize, pattern: qrPattern, patternSize: qrPixelSize, pixelsPerBit: pixelsPerQRBit, opacity: opacity)
         }
     }
     
     private func drawSubtleQRCode(context: CGContext, at position: CGPoint, size: CGFloat, pattern: [UInt8], patternSize: Int, pixelsPerBit: CGFloat, opacity: Int) {
-        // Draw QR with very low opacity in alpha channel only to avoid LSB interference
-        
         for y in 0..<patternSize {
             for x in 0..<patternSize {
                 let patternIndex = y * patternSize + x
                 if patternIndex < pattern.count {
                     let bit = pattern[patternIndex]
                     
-                    // Only modify alpha channel to avoid LSB data corruption
                     let alphaValue = bit == 1 ? CGFloat(opacity) / 255.0 : 0.0
                     let color = CGColor(red: 0, green: 0, blue: 0, alpha: alphaValue)
                     context.setFillColor(color)
@@ -1040,7 +988,6 @@ struct SaveOverlayCommand: ParsableCommand {
                         width: pixelsPerBit,
                         height: pixelsPerBit
                     )
-                    
                     context.fill(pixelRect)
                 }
             }
@@ -1051,32 +998,29 @@ struct SaveOverlayCommand: ParsableCommand {
 struct SaveDesktopCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "save-desktop",
-        abstract: "Capture desktop screenshot with watermark overlay applied"
+        abstract: "Capture a desktop screenshot with the watermark overlay applied."
     )
-    
-    @Argument(help: "Output PNG file path")
+
+    @Argument(help: "The file path to save the PNG screenshot.")
     var outputPath: String
-    
-    @Flag(name: .shortAndLong, help: "Show verbose information")
+
+    @Flag(name: .shortAndLong, help: "Show verbose information during capture.")
     var verbose: Bool = false
-    
-    @Flag(name: .shortAndLong, help: "Show debug information")
+
+    @Flag(name: .shortAndLong, help: "Show debugging information for capture.")
     var debug: Bool = false
-    
+
     func run() throws {
         let logger = Logger(verbose: verbose, debug: debug)
         
         print("Waldo v\(Version.current)")
         print("Capturing desktop with overlay to: \(outputPath)")
         
-        // Validate output path
         let outputURL = URL(fileURLWithPath: outputPath)
         guard outputURL.pathExtension.lowercased() == "png" else {
-            print("Error: Output file must have .png extension")
-            throw ExitCode.failure
+            throw WaldoError.invalidOutputPath(outputPath)
         }
         
-        // Check if overlay is running (check both local and daemon processes)
         let manager = OverlayWindowManager.shared
         let status = manager.getStatus()
         
@@ -1085,13 +1029,11 @@ struct SaveDesktopCommand: ParsableCommand {
         
         logger.debug("Overlay status: active=\(isActive), daemon=\(daemonDetected)")
         
-        // Also check for waldo overlay processes directly
         let hasOverlayProcess = checkForOverlayProcess(logger: logger)
         
         guard isActive || daemonDetected || hasOverlayProcess else {
-            print("Error: No active overlay found. Start overlay first with 'waldo overlay start'")
             logger.debug("Status check failed: active=\(isActive), daemon=\(daemonDetected), process=\(hasOverlayProcess)")
-            throw ExitCode.failure
+            throw WaldoError.noActiveOverlay
         }
         
         if hasOverlayProcess && !isActive {
@@ -1104,7 +1046,6 @@ struct SaveDesktopCommand: ParsableCommand {
             try captureDesktopWithOverlay(to: outputURL, logger: logger)
             print("✓ Desktop with overlay captured successfully")
             
-            // Display watermark details
             let systemInfo = SystemInfo.getSystemInfo()
             print("\nWatermark Details:")
             print(".  Username: \(systemInfo["username"] ?? "unknown")")
@@ -1112,13 +1053,11 @@ struct SaveDesktopCommand: ParsableCommand {
             print(".  Machine UUID: \(systemInfo["machineUUID"] ?? "unknown")")
             print(".  Timestamp: \(SystemInfo.getFormattedTimestamp())")
             
-            // Suggest test command
             print("\nTest extraction with:")
             print("  waldo extract \(outputPath) --verbose")
             
         } catch {
-            print("Error: Failed to capture desktop: \(error.localizedDescription)")
-            throw ExitCode.failure
+            throw WaldoError.failedToCaptureDesktop(error)
         }
     }
     
@@ -1136,7 +1075,6 @@ struct SaveDesktopCommand: ParsableCommand {
         
         logger.debug("Screen bounds: \(screenRect), scale: \(scaleFactor)")
         
-        // Create display ID from screen
         guard let displayID = mainScreen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else {
             throw NSError(domain: "WaldoError", code: 2, userInfo: [NSLocalizedDescriptionKey: "Could not get display ID"])
         }
@@ -1145,7 +1083,6 @@ struct SaveDesktopCommand: ParsableCommand {
         
         logger.debug("Capturing screen with CGDisplayCreateImage...")
         
-        // Capture the screen including overlay windows
         guard let image = CGDisplayCreateImage(cgDisplayID) else {
             throw NSError(domain: "WaldoError", code: 3, userInfo: [NSLocalizedDescriptionKey: "Failed to capture screen"])
         }
@@ -1155,7 +1092,6 @@ struct SaveDesktopCommand: ParsableCommand {
         
         logger.debug("Saving captured image to: \(url.path)")
         
-        // Save as PNG
         guard let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil) else {
             throw NSError(domain: "WaldoError", code: 4, userInfo: [NSLocalizedDescriptionKey: "Failed to create image destination"])
         }
@@ -1183,7 +1119,6 @@ struct SaveDesktopCommand: ParsableCommand {
         task.standardError = Pipe()
         task.launch()
         
-        // Add timeout to prevent hanging
         let semaphore = DispatchSemaphore(value: 0)
         var taskCompleted = false
         
@@ -1229,24 +1164,24 @@ struct SaveDesktopCommand: ParsableCommand {
 struct OverlaySampleCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "overlay_sample",
-        abstract: "Display a tiled wireframe beagle dog overlay for testing and identification"
+        abstract: "Display a tiled wireframe beagle overlay for testing."
     )
-    
-    @Option(name: .shortAndLong, help: "Tile size in pixels (default: 150)")
+
+    @Option(name: .shortAndLong, help: "The size of each repeating beagle tile in pixels.")
     var tileSize: Int = 150
-    
-    @Option(name: .shortAndLong, help: "Line width for wireframe (default: 3)")
+
+    @Option(name: .shortAndLong, help: "The line width for the wireframe beagle drawing.")
     var lineWidth: Int = 3
-    
-    @Option(name: .shortAndLong, help: "Opacity percentage (0.1-100, default: 5)")
+
+    @Option(name: .shortAndLong, help: "The opacity of the beagle overlay as a percentage (0.1 to 100).")
     var opacity: Double = 5.0
-    
-    @Flag(name: .shortAndLong, help: "Show verbose information")
+
+    @Flag(name: .shortAndLong, help: "Show verbose information during startup.")
     var verbose: Bool = false
-    
-    @Flag(name: .shortAndLong, help: "Show debug information")
+
+    @Flag(name: .shortAndLong, help: "Show debugging information for startup.")
     var debug: Bool = false
-    
+
     func run() throws {
         let logger = Logger(verbose: verbose, debug: debug)
         
@@ -1255,34 +1190,27 @@ struct OverlaySampleCommand: ParsableCommand {
         
         logger.debug("Creating beagle overlay with tile size: \(tileSize), line width: \(lineWidth), opacity: \(opacity)%")
         
-        // Validate parameters
         guard tileSize >= 50 && tileSize <= 500 else {
-            print("Error: Tile size must be between 50 and 500 pixels (provided: \(tileSize))")
-            throw ExitCode.failure
+            throw WaldoError.invalidTileSize(tileSize)
         }
         
         guard lineWidth >= 1 && lineWidth <= 10 else {
-            print("Error: Line width must be between 1 and 10 pixels (provided: \(lineWidth))")
-            throw ExitCode.failure
+            throw WaldoError.invalidLineWidth(lineWidth)
         }
         
         guard opacity >= 0.1 && opacity <= 100.0 else {
-            print("Error: Opacity must be between 0.1 and 100 percent (provided: \(opacity))")
-            throw ExitCode.failure
+            throw WaldoError.invalidOpacityPercentage(opacity)
         }
         
-        // Check if overlay is already running
         let manager = OverlayWindowManager.shared
         let status = manager.getStatus()
         
         if status["active"] as? Bool == true {
-            print("Error: Overlay is already running. Use 'waldo overlay stop' first.")
-            throw ExitCode.failure
+            throw WaldoError.overlayAlreadyRunning
         }
         
         logger.debug("Starting beagle overlay...")
         
-        // Get current user name
         let userName = NSUserName()
         
         do {
@@ -1292,12 +1220,10 @@ struct OverlaySampleCommand: ParsableCommand {
             print("✓ Opacity: \(opacity)% visibility")
             print("Press Ctrl+C to stop the overlay")
             
-            // Keep the process running
             RunLoop.main.run()
         } catch {
             logger.debug("Failed to start beagle overlay: \(error)")
-            print("Error: Failed to start overlay - \(error.localizedDescription)")
-            throw ExitCode.failure
+            throw WaldoError.failedToStartBeagleOverlay(error)
         }
     }
     
@@ -1322,7 +1248,6 @@ struct OverlaySampleCommand: ParsableCommand {
             window.ignoresMouseEvents = true
             window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
             
-            // Create the beagle view
             let beagleView = BeagleOverlayView(frame: window.contentView!.bounds, tileSize: tileSize, lineWidth: lineWidth, opacity: opacity, userName: userName)
             window.contentView = beagleView
             
@@ -1332,7 +1257,6 @@ struct OverlaySampleCommand: ParsableCommand {
         
         logger.debug("Created \(overlayWindows.count) beagle overlay windows")
         
-        // Store windows globally to prevent deallocation
         OverlayWindowManager.shared.setBeagleWindows(overlayWindows)
     }
 }

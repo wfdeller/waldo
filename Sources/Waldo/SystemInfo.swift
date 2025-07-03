@@ -25,7 +25,7 @@ class SystemInfo {
     }
     
     static func getMachineUUID() -> String {
-        let platformExpert = IOServiceGetMatchingService(kIOMasterPortDefault, IOServiceMatching("IOPlatformExpertDevice"))
+        let platformExpert = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPlatformExpertDevice"))
         
         guard platformExpert > 0 else {
             return ProcessInfo.processInfo.globallyUniqueString
@@ -48,7 +48,7 @@ class SystemInfo {
     }
     
     static func getSystemSerialNumber() -> String? {
-        let platformExpert = IOServiceGetMatchingService(kIOMasterPortDefault, IOServiceMatching("IOPlatformExpertDevice"))
+        let platformExpert = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("IOPlatformExpertDevice"))
         
         guard platformExpert > 0 else { return nil }
         

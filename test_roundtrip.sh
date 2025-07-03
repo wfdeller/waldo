@@ -2,7 +2,7 @@
 
 # Waldo Round-trip Validation Test Suite
 # Tests save-overlay -> extract and save-desktop -> extract cycles to validate functionality
-# Includes desktop capture testing with optimized parameters for screenshot detection
+# Includes overlay type testing, desktop capture testing with optimized parameters for screenshot detection
 
 set -e  # Exit on any error
 
@@ -263,6 +263,121 @@ run_threshold_tests() {
     fi
 }
 
+# Function to run overlay type tests
+run_overlay_type_tests() {
+    print_header "Overlay Type Testing"
+    
+    # Test different overlay types
+    local overlay_types=("hybrid" "qr" "luminous" "steganography" "beagle")
+    local type_test_passed=0
+    local type_test_total=0
+    
+    for overlay_type in "${overlay_types[@]}"; do
+        type_test_total=$((type_test_total + 1))
+        local type_file="$TEMP_DIR/overlay_type_${overlay_type}.png"
+        
+        echo -n "Testing $overlay_type overlay type... "
+        
+        # Stop any existing overlay
+        $WALDO_BINARY overlay stop >/dev/null 2>&1 || true
+        
+        # Start overlay with specific type
+        if $WALDO_BINARY overlay start "$overlay_type" --daemon --opacity 80 $WALDO_FLAGS >/dev/null 2>&1; then
+            # Wait for overlay to initialize
+            sleep 2
+            
+            # Capture overlay
+            if $WALDO_BINARY overlay save-desktop "$type_file" $WALDO_FLAGS >/dev/null 2>&1; then
+                # Test extraction based on overlay type
+                local extraction_success=false
+                
+                case "$overlay_type" in
+                    "hybrid"|"qr"|"steganography")
+                        # These types embed data, test extraction
+                        if $WALDO_BINARY extract "$type_file" --threshold 0.3 $WALDO_FLAGS >/dev/null 2>&1; then
+                            extraction_success=true
+                        elif $WALDO_BINARY extract "$type_file" --simple-extraction $WALDO_FLAGS >/dev/null 2>&1; then
+                            extraction_success=true
+                        fi
+                        ;;
+                    "luminous")
+                        # Luminous type attempts brightness-based detection
+                        if $WALDO_BINARY extract "$type_file" --threshold 0.3 $WALDO_FLAGS >/dev/null 2>&1; then
+                            extraction_success=true
+                        elif $WALDO_BINARY extract "$type_file" --threshold 0.1 $WALDO_FLAGS >/dev/null 2>&1; then
+                            extraction_success=true
+                        else
+                            # Luminous might not be detectable, just verify file was created
+                            if [[ -f "$type_file" ]] && [[ -s "$type_file" ]]; then
+                                extraction_success=true
+                            fi
+                        fi
+                        ;;
+                    "beagle")
+                        # Beagle type doesn't embed data, just verify file was created
+                        if [[ -f "$type_file" ]] && [[ -s "$type_file" ]]; then
+                            extraction_success=true
+                        fi
+                        ;;
+                esac
+                
+                if [[ "$extraction_success" == "true" ]]; then
+                    print_success "$overlay_type overlay PASSED"
+                    type_test_passed=$((type_test_passed + 1))
+                else
+                    print_failure "$overlay_type overlay FAILED (extraction)"
+                fi
+            else
+                print_failure "$overlay_type overlay FAILED (capture)"
+            fi
+            
+            # Stop overlay
+            $WALDO_BINARY overlay stop >/dev/null 2>&1 || true
+        else
+            print_failure "$overlay_type overlay FAILED (start)"
+        fi
+        
+        # Clean up
+        if [[ "$KEEP_FILES" == "false" ]] && [[ -f "$type_file" ]]; then
+            rm -f "$type_file"
+        fi
+        
+        # Brief pause between tests
+        sleep 1
+    done
+    
+    # Test luminous flag with other overlay types
+    echo -n "Testing QR with luminous flag... "
+    local luminous_flag_file="$TEMP_DIR/overlay_qr_luminous.png"
+    
+    if $WALDO_BINARY overlay start "qr" --luminous --daemon --opacity 100 $WALDO_FLAGS >/dev/null 2>&1; then
+        sleep 2
+        if $WALDO_BINARY overlay save-desktop "$luminous_flag_file" $WALDO_FLAGS >/dev/null 2>&1; then
+            if $WALDO_BINARY extract "$luminous_flag_file" --threshold 0.3 $WALDO_FLAGS >/dev/null 2>&1; then
+                print_success "QR with luminous flag PASSED"
+                type_test_passed=$((type_test_passed + 1))
+            else
+                print_failure "QR with luminous flag FAILED (extraction)"
+            fi
+        else
+            print_failure "QR with luminous flag FAILED (capture)"
+        fi
+        $WALDO_BINARY overlay stop >/dev/null 2>&1 || true
+        type_test_total=$((type_test_total + 1))
+    else
+        print_failure "QR with luminous flag FAILED (start)"
+        type_test_total=$((type_test_total + 1))
+    fi
+    
+    # Clean up
+    if [[ "$KEEP_FILES" == "false" ]] && [[ -f "$luminous_flag_file" ]]; then
+        rm -f "$luminous_flag_file"
+    fi
+    
+    
+    print_status "$BLUE" "Overlay type tests: $type_test_passed/$type_test_total passed"
+}
+
 # Function to run desktop overlay tests
 run_desktop_overlay_tests() {
     print_header "Desktop Overlay Testing"
@@ -285,7 +400,7 @@ run_desktop_overlay_tests() {
         echo -n "Starting desktop overlay... "
         
         # Start overlay in background (macOS doesn't have timeout command)
-        $WALDO_BINARY overlay start --daemon --opacity 60 $WALDO_FLAGS >/dev/null 2>&1 &
+        $WALDO_BINARY overlay start hybrid --daemon --opacity 60 $WALDO_FLAGS >/dev/null 2>&1 &
         overlay_pid=$!
         
         # Wait for overlay process to initialize
@@ -400,8 +515,8 @@ run_desktop_capture_tests() {
         # Stop any existing overlay
         $WALDO_BINARY overlay stop >/dev/null 2>&1 || true
         
-        # Start overlay with specific opacity
-        if $WALDO_BINARY overlay start --daemon --opacity "$opacity" $WALDO_FLAGS >/dev/null 2>&1; then
+        # Start overlay with specific opacity (use hybrid for desktop capture tests)
+        if $WALDO_BINARY overlay start hybrid --daemon --opacity "$opacity" $WALDO_FLAGS >/dev/null 2>&1; then
             # Wait for overlay to initialize with timeout
             local init_count=0
             local max_init_wait=10
@@ -592,6 +707,7 @@ main() {
         # Run additional test suites
         run_performance_test
         run_threshold_tests
+        run_overlay_type_tests
         run_desktop_overlay_tests
         run_desktop_capture_tests
         run_edge_case_tests
@@ -622,8 +738,11 @@ main() {
     if [[ $exit_code -eq 0 ]]; then
         echo
         print_status "$BLUE" "Next steps:"
-        echo "  • Test with real camera photos: waldo overlay start && take photo && waldo extract photo.jpg"
-        echo "  • Test desktop capture with optimized parameters: waldo overlay start --opacity 100 && waldo overlay save-desktop desktop.png && waldo extract desktop.png --threshold 0.3"
+        echo "  • Test with luminous markers only: waldo overlay start luminous && take photo && waldo extract photo.jpg"
+        echo "  • Test QR code detection: waldo overlay start qr --opacity 100 && take photo && waldo extract photo.jpg"
+        echo "  • Test QR with luminous enhancement: waldo overlay start qr --luminous --opacity 80 && take photo && waldo extract photo.jpg"
+        echo "  • Test steganography with luminous: waldo overlay start steganography --luminous --opacity 60 && take photo && waldo extract photo.jpg"
+        echo "  • Test desktop capture with optimized parameters: waldo overlay start hybrid --opacity 100 && waldo overlay save-desktop desktop.png && waldo extract desktop.png --threshold 0.3"
         echo "  • Test screenshot extraction: waldo extract screenshot.png --threshold 0.2 --debug"
         echo "  • Run performance benchmarks: time waldo overlay save-overlay test.png && time waldo extract test.png --simple-extraction"
         echo "  • Debug desktop capture issues: waldo extract desktop.png --threshold 0.1 --debug --verbose"

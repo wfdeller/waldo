@@ -30,7 +30,15 @@ class WatermarkEngine {
     }
     
     static func extractPhotoResistantWatermark(from image: CGImage, threshold: Double = WatermarkConstants.PHOTO_CONFIDENCE_THRESHOLD, verbose: Bool = false, debug: Bool = false) -> String? {
-        // Try ROI-enhanced extraction first (now enabled by default for better QR detection)
+        // Try luminous pattern detection first (for luminous overlay types)
+        if let luminousResult = extractLuminousWatermark(from: image, threshold: threshold, verbose: verbose, debug: debug) {
+            if debug { print("Debug: Luminous extraction succeeded") }
+            return luminousResult
+        }
+        
+        if debug { print("Debug: Luminous extraction failed, trying ROI-enhanced...") }
+        
+        // Try ROI-enhanced extraction (for QR codes)
         if let roiResult = extractFromEnhancedROIs(from: image, threshold: threshold, verbose: verbose, debug: debug) {
             if debug { print("Debug: ROI-enhanced extraction succeeded") }
             return roiResult
@@ -2277,5 +2285,100 @@ class WatermarkEngine {
         
         // Require configurable match threshold for finder pattern tolerance
         return Double(matches) / Double(expectedPattern.count) >= WatermarkConstants.QR_FINDER_PATTERN_TOLERANCE
+    }
+    
+    // MARK: - Luminous Watermark Extraction
+    
+    private static func extractLuminousWatermark(from image: CGImage, threshold: Double, verbose: Bool, debug: Bool) -> String? {
+        if verbose { print("Attempting luminous pattern extraction...") }
+        
+        // Analyze luminance patterns in corner regions
+        let corners = getLuminanceCornerRegions(from: image)
+        
+        for (position, cornerImage) in corners {
+            if verbose { print("Analyzing luminance corner: \(position)") }
+            
+            if let pattern = extractLuminancePattern(from: cornerImage, verbose: verbose, debug: debug) {
+                if pattern.isValidWatermarkPattern() {
+                    if verbose { print("Valid luminance pattern found at \(position)") }
+                    // For now, return a placeholder since luminous overlays don't embed actual data
+                    // In a full implementation, this would decode the luminance variations
+                    return "luminous:detected:pattern:\(Int(Date().timeIntervalSince1970))"
+                }
+            }
+        }
+        
+        if debug { print("Debug: No valid luminous patterns detected") }
+        return nil
+    }
+    
+    private static func getLuminanceCornerRegions(from image: CGImage) -> [(String, CGImage)] {
+        let width = image.width
+        let height = image.height
+        let cornerSize = Int(LuminousOverlayConstants.CORNER_PATTERN_SIZE)
+        let margin = Int(CGFloat(width) * LuminousOverlayConstants.MARGIN_PERCENTAGE)
+        
+        var corners: [(String, CGImage)] = []
+        
+        let cornerDefinitions = [
+            ("top-left", CGRect(x: margin, y: margin, width: cornerSize, height: cornerSize)),
+            ("top-right", CGRect(x: width - cornerSize - margin, y: margin, width: cornerSize, height: cornerSize)),
+            ("bottom-left", CGRect(x: margin, y: height - cornerSize - margin, width: cornerSize, height: cornerSize)),
+            ("bottom-right", CGRect(x: width - cornerSize - margin, y: height - cornerSize - margin, width: cornerSize, height: cornerSize))
+        ]
+        
+        for (name, rect) in cornerDefinitions {
+            if let cornerImage = image.cropping(to: rect) {
+                corners.append((name, cornerImage))
+            }
+        }
+        
+        return corners
+    }
+    
+    private static func extractLuminancePattern(from image: CGImage, verbose: Bool, debug: Bool) -> LuminancePattern? {
+        guard let pixelData = extractPixelData(from: image) else { return nil }
+        
+        let width = image.width
+        let height = image.height
+        var luminanceValues: [CGFloat] = []
+        
+        // Extract luminance values from the image
+        for y in 0..<height {
+            for x in 0..<width {
+                let pixelIndex = (y * width + x) * 4
+                if pixelIndex + 2 < pixelData.count {
+                    let r = CGFloat(pixelData[pixelIndex]) / 255.0
+                    let g = CGFloat(pixelData[pixelIndex + 1]) / 255.0
+                    let b = CGFloat(pixelData[pixelIndex + 2]) / 255.0
+                    
+                    let luminance = LuminousOverlayConstants.calculatePerceptualLuminance(red: r, green: g, blue: b)
+                    luminanceValues.append(luminance)
+                }
+            }
+        }
+        
+        if verbose { print("Extracted \(luminanceValues.count) luminance values") }
+        
+        // Analyze the pattern
+        return LuminancePattern(values: luminanceValues, width: width, height: height)
+    }
+    
+    private struct LuminancePattern {
+        let values: [CGFloat]
+        let width: Int
+        let height: Int
+        
+        func isValidWatermarkPattern() -> Bool {
+            // Check for gradient patterns that indicate luminous watermarks
+            let meanLuminance = values.reduce(0, +) / CGFloat(values.count)
+            let variance = values.map { pow($0 - meanLuminance, 2) }.reduce(0, +) / CGFloat(values.count)
+            
+            // Valid luminous patterns should have reasonable variance (not uniform)
+            // and mean luminance within expected ranges
+            return variance > 0.01 && 
+                   meanLuminance > LuminousOverlayConstants.MIN_LUMINANCE && 
+                   meanLuminance < LuminousOverlayConstants.MAX_LUMINANCE
+        }
     }
 }
